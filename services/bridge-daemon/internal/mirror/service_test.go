@@ -1,0 +1,272 @@
+package mirror
+
+import (
+	"context"
+	"errors"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"cloudlight.dev/codexbridge/bridge-daemon/internal/channels"
+	"cloudlight.dev/codexbridge/bridge-daemon/internal/control"
+	"cloudlight.dev/codexbridge/bridge-daemon/internal/events"
+	"cloudlight.dev/codexbridge/bridge-daemon/internal/interactions"
+	"cloudlight.dev/codexbridge/bridge-daemon/internal/threadregistry"
+)
+
+type fakeControl struct {
+	mu     sync.Mutex
+	detail control.ThreadDetail
+}
+
+func (f *fakeControl) ListThreads(context.Context, int, string) (control.ThreadList, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return control.ThreadList{Threads: []control.ThreadSummary{f.detail.ThreadSummary}}, nil
+}
+
+func (f *fakeControl) ReadThread(context.Context, string, bool) (control.ThreadDetail, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.detail, nil
+}
+
+func (f *fakeControl) setTurns(turns ...control.Turn) {
+	f.mu.Lock()
+	f.detail.Turns = turns
+	f.mu.Unlock()
+}
+
+type fakeRuntime struct{}
+
+func (fakeRuntime) RuntimeState(id string) control.RuntimeState {
+	return control.RuntimeState{ThreadID: id, State: "idle"}
+}
+
+type sendRecorder struct {
+	mu   sync.Mutex
+	sent []string
+	fail bool
+}
+
+func (r *sendRecorder) target() Target {
+	return Target{
+		Status: func() (string, bool) { return "account", true },
+		Send: func(_ context.Context, message channels.OutboundMessage) (channels.OutboundResult, error) {
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			if r.fail {
+				return channels.OutboundResult{}, errors.New("temporary failure")
+			}
+			r.sent = append(r.sent, message.Text)
+			return channels.OutboundResult{MessageID: "ok"}, nil
+		},
+	}
+}
+
+func (r *sendRecorder) count() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.sent)
+}
+
+func (r *sendRecorder) first() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.sent) == 0 {
+		return ""
+	}
+	return r.sent[0]
+}
+
+func newFixture(t *testing.T, path string, telegram, qq *sendRecorder) (*Service, *fakeControl, *events.Broker, *threadregistry.Registry) {
+	t.Helper()
+	dir := filepath.Dir(path)
+	registry, err := threadregistry.New(filepath.Join(dir, "threads.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = registry.Ensure(threadregistry.Metadata{ThreadID: "thread", Title: "Title", CreatedAt: "2026-01-01T00:00:00Z"})
+	reader := &fakeControl{detail: control.ThreadDetail{ThreadSummary: control.ThreadSummary{ThreadID: "thread", Number: 1, Title: "Title", CreatedAt: "2026-01-01T00:00:00Z"}}}
+	broker := events.NewBroker()
+	service, err := New(path, reader, fakeRuntime{}, registry, broker, nil, telegram.target(), qq.target())
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.baselineAll()
+	_, err = service.Configure(Config{
+		Enabled: true, RequireThreadNumber: true,
+		Messages: MessageTypes{Assistant: true, RequestUserInput: true, Error: true},
+		Telegram: TelegramConfig{Enabled: true, ChatID: "telegram-chat"},
+		QQ:       QQConfig{Enabled: true, ConversationType: "c2c", OpenID: "qq-open-id"},
+	})
+	if err != nil {
+		service.Close()
+		t.Fatal(err)
+	}
+	return service, reader, broker, registry
+}
+
+func completedTurn(id, itemID, text string) control.Turn {
+	return control.Turn{TurnID: id, Status: "completed", Items: []control.Item{
+		{ItemID: "user-" + id, Type: "userMessage", Role: "user", Text: "prompt " + id},
+		{ItemID: itemID, Type: "agentMessage", Role: "assistant", Text: text},
+	}}
+}
+
+func waitFor(t *testing.T, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for mirror delivery")
+}
+
+func TestMultipleNotificationsMirrorFinalOnce(t *testing.T) {
+	dir := t.TempDir()
+	tg, qq := &sendRecorder{}, &sendRecorder{}
+	service, reader, _, _ := newFixture(t, filepath.Join(dir, "mirror.json"), tg, qq)
+	defer service.Close()
+	reader.setTurns(completedTurn("turn-1", "assistant-1", "ONE"))
+	for range 5 {
+		service.handleEvent(events.Event{EventType: events.TurnCompleted, ThreadID: "thread", TurnID: "turn-1", Payload: map[string]any{"status": "persisted"}})
+	}
+	waitFor(t, func() bool { return tg.count() == 1 && qq.count() == 1 })
+	time.Sleep(50 * time.Millisecond)
+	if tg.count() != 1 || qq.count() != 1 {
+		t.Fatalf("duplicate final: telegram=%d qq=%d", tg.count(), qq.count())
+	}
+}
+
+func TestDeltaAndPersistedMirrorFinalOnce(t *testing.T) {
+	dir := t.TempDir()
+	tg, qq := &sendRecorder{}, &sendRecorder{}
+	service, reader, _, _ := newFixture(t, filepath.Join(dir, "mirror.json"), tg, qq)
+	defer service.Close()
+	service.handleEvent(events.Event{EventType: events.AssistantDelta, ThreadID: "thread", TurnID: "turn-1", ItemID: "assistant-1", Payload: map[string]any{"delta": "streamed"}})
+	service.handleEvent(events.Event{EventType: events.AssistantCompleted, ThreadID: "thread", TurnID: "turn-1", ItemID: "assistant-1"})
+	if tg.count() != 0 || qq.count() != 0 {
+		t.Fatal("delta or item completion produced outbound content")
+	}
+	reader.setTurns(completedTurn("turn-1", "assistant-1", "ONE"))
+	service.handleEvent(events.Event{EventType: events.TurnCompleted, ThreadID: "thread", TurnID: "turn-1", Payload: map[string]any{"status": "persisted"}})
+	waitFor(t, func() bool { return tg.count() == 1 && qq.count() == 1 })
+	service.handleEvent(events.Event{EventType: events.AssistantCompleted, ThreadID: "thread", TurnID: "turn-1", ItemID: "assistant-1"})
+	service.syncThread("thread")
+	if tg.count() != 1 || qq.count() != 1 {
+		t.Fatal("persisted final was mirrored more than once")
+	}
+}
+
+func TestScannerAndNotificationMirrorFinalOnce(t *testing.T) {
+	dir := t.TempDir()
+	tg, qq := &sendRecorder{}, &sendRecorder{}
+	service, reader, _, _ := newFixture(t, filepath.Join(dir, "mirror.json"), tg, qq)
+	defer service.Close()
+	reader.setTurns(completedTurn("turn-1", "assistant-1", "ONE"))
+	done := make(chan struct{}, 2)
+	go func() { service.syncThread("thread"); done <- struct{}{} }()
+	go func() {
+		service.handleEvent(events.Event{EventType: events.TurnCompleted, ThreadID: "thread", TurnID: "turn-1", Payload: map[string]any{"status": "persisted"}})
+		done <- struct{}{}
+	}()
+	<-done
+	<-done
+	waitFor(t, func() bool { return tg.count() == 1 && qq.count() == 1 })
+}
+
+func TestMirrorCursorsAreIndependentAndRestartDoesNotReplay(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mirror.json")
+	tg, qq := &sendRecorder{fail: true}, &sendRecorder{}
+	service, reader, _, _ := newFixture(t, path, tg, qq)
+	reader.setTurns(completedTurn("turn-1", "assistant-1", "answer"))
+	service.syncThread("thread")
+	if tg.count() != 0 || qq.count() != 1 {
+		t.Fatalf("first delivery telegram=%d qq=%d", tg.count(), qq.count())
+	}
+	tg.mu.Lock()
+	tg.fail = false
+	tg.mu.Unlock()
+	service.syncThread("thread")
+	if tg.count() != 1 || qq.count() != 1 {
+		t.Fatalf("independent retry telegram=%d qq=%d", tg.count(), qq.count())
+	}
+	service.Close()
+
+	service2, _, _, _ := newFixture(t, path, tg, qq)
+	reader2 := service2.control.(*fakeControl)
+	reader2.setTurns(completedTurn("turn-1", "assistant-1", "answer"))
+	service2.syncThread("thread")
+	service2.Close()
+	if tg.count() != 1 || qq.count() != 1 {
+		t.Fatalf("restart replayed final telegram=%d qq=%d", tg.count(), qq.count())
+	}
+}
+
+func TestConsecutiveTurnsAreIndependentMessages(t *testing.T) {
+	dir := t.TempDir()
+	tg, qq := &sendRecorder{}, &sendRecorder{}
+	service, reader, _, _ := newFixture(t, filepath.Join(dir, "mirror.json"), tg, qq)
+	defer service.Close()
+	reader.setTurns(completedTurn("turn-1", "assistant-1", "ONE"))
+	service.syncThread("thread")
+	reader.setTurns(completedTurn("turn-1", "assistant-1", "ONE"), completedTurn("turn-2", "assistant-2", "TWO"))
+	service.syncThread("thread")
+	if tg.count() != 2 || qq.count() != 2 {
+		t.Fatalf("turn count telegram=%d qq=%d", tg.count(), qq.count())
+	}
+	tg.mu.Lock()
+	got := append([]string(nil), tg.sent...)
+	tg.mu.Unlock()
+	if got[0] != "#1 Title\nONE" || got[1] != "#1 Title\nTWO" {
+		t.Fatalf("unexpected final format: %#v", got)
+	}
+}
+
+func TestRequestUserInputStillMirrorsOnce(t *testing.T) {
+	dir := t.TempDir()
+	tg, qq := &sendRecorder{}, &sendRecorder{}
+	service, _, _, _ := newFixture(t, filepath.Join(dir, "mirror.json"), tg, qq)
+	defer service.Close()
+	interaction := interactions.PendingInteraction{
+		ID: "input-1", Kind: interactions.KindUserInput, ThreadID: "thread", TurnID: "turn-1",
+		Questions: []interactions.Question{{ID: "choice", Text: "选择方案", Options: []interactions.QuestionOption{{Label: "A"}, {Label: "B"}}}},
+	}
+	event := events.Event{EventType: events.InteractionRequested, ThreadID: "thread", TurnID: "turn-1", Payload: map[string]any{"interaction": interaction}}
+	service.handleEvent(event)
+	service.handleEvent(event)
+	waitFor(t, func() bool { return tg.count() == 1 && qq.count() == 1 })
+	if text := tg.first(); !strings.Contains(text, "#1 Title\n需要你选择：") || !strings.Contains(text, "回复：\n#1 1") {
+		t.Fatalf("unexpected interaction format: %q", text)
+	}
+}
+
+func TestLongFinalUsesOnlyNecessaryNumberedParts(t *testing.T) {
+	parts := splitFinalMessage("#53 Title", strings.Repeat("界", 8000), 3900)
+	if len(parts) != 3 || !strings.HasPrefix(parts[0], "#53 Title (1/3)\n") || !strings.HasPrefix(parts[2], "#53 Title (3/3)\n") {
+		t.Fatalf("unexpected parts: count=%d first=%q last=%q", len(parts), parts[0][:min(24, len(parts[0]))], parts[len(parts)-1][:min(24, len(parts[len(parts)-1]))])
+	}
+}
+
+func TestNumericQQAccountCannotBeConfiguredAsMirrorOpenID(t *testing.T) {
+	dir := t.TempDir()
+	registry, _ := threadregistry.New(filepath.Join(dir, "threads.json"))
+	reader := &fakeControl{}
+	target := (&sendRecorder{}).target()
+	service, err := New(filepath.Join(dir, "mirror.json"), reader, fakeRuntime{}, registry, events.NewBroker(), nil, target, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	_, err = service.Configure(Config{Enabled: true, QQ: QQConfig{Enabled: true, ConversationType: "c2c", OpenID: "1234567890"}})
+	if err == nil {
+		t.Fatal("numeric QQ account must not be accepted as an official OpenID")
+	}
+}

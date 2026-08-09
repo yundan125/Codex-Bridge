@@ -1,0 +1,12 @@
+.reference/
+.tools/
+.vs/
+.idea/
+.vscode/
+artifacts/
+NapCat/
+**/bin/
+**/obj/
+*.user
+*.suo
+*.log

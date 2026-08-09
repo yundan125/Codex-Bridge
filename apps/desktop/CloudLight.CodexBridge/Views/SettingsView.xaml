@@ -1,0 +1,100 @@
+<UserControl x:Class="CloudLight.CodexBridge.Views.SettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel MaxWidth="900" HorizontalAlignment="Left">
+            <TextBlock Text="{StaticResource SettingsTitle}" FontSize="24" FontWeight="SemiBold" />
+            <TextBlock Text="{StaticResource SettingsIntro}" Foreground="{StaticResource MutedBrush}" Margin="0,7,0,20" />
+            <Border Style="{StaticResource CardStyle}" Margin="0,0,0,14">
+                <StackPanel>
+                    <TextBlock Text="{StaticResource CodexCli}" FontSize="17" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding CodexDetection}" TextWrapping="Wrap" Margin="0,8,0,12" Foreground="{StaticResource MutedBrush}" />
+                    <TextBlock Text="{StaticResource CustomCodexPath}" />
+                    <TextBox Text="{Binding CodexCustomPath, UpdateSourceTrigger=PropertyChanged}" Margin="0,6,0,4" MinWidth="620" />
+                    <TextBlock Text="{StaticResource CustomPathHint}" Foreground="{StaticResource MutedBrush}" FontSize="12" />
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource CardStyle}" Margin="0,0,0,14">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="150" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <TextBlock Text="{StaticResource BackendStatus}" Foreground="{StaticResource MutedBrush}" Margin="0,5" />
+                    <TextBlock Grid.Column="1" Text="{Binding BackendStatus}" Margin="0,5" />
+                    <TextBlock Grid.Row="1" Text="{StaticResource DataDirectory}" Foreground="{StaticResource MutedBrush}" Margin="0,5" />
+                    <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding DataDirectory}" TextWrapping="Wrap" Margin="0,5" />
+                    <Button Grid.Row="1" Grid.Column="2" Content="{StaticResource Open}" Command="{Binding OpenDataDirectoryCommand}" />
+                    <TextBlock Grid.Row="2" Text="{StaticResource LogDirectory}" Foreground="{StaticResource MutedBrush}" Margin="0,5" />
+                    <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding LogDirectory}" TextWrapping="Wrap" Margin="0,5" />
+                    <Button Grid.Row="2" Grid.Column="2" Content="{StaticResource Open}" Command="{Binding OpenLogDirectoryCommand}" />
+                </Grid>
+            </Border>
+            <Border Style="{StaticResource CardStyle}" Margin="0,0,0,14">
+                <StackPanel>
+                    <TextBlock Text="新 Turn 安全策略" FontSize="17" FontWeight="SemiBold" />
+                    <TextBlock Text="沙盒模式" Foreground="{StaticResource MutedBrush}" Margin="0,10,0,4" />
+                    <ComboBox ItemsSource="{Binding SandboxModes}" SelectedItem="{Binding SandboxMode, Mode=TwoWay}" Width="220" HorizontalAlignment="Left" />
+                    <Grid Margin="0,12,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="160" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <TextBlock Text="审批策略" Foreground="{StaticResource MutedBrush}" Margin="0,3" />
+                        <TextBlock Grid.Column="1" Text="{Binding ApprovalPolicy}" Margin="0,3" />
+                        <TextBlock Grid.Row="1" Text="危险完全权限" Foreground="{StaticResource MutedBrush}" Margin="0,3" />
+                        <TextBlock Grid.Row="1" Grid.Column="1" Text="关闭（不提供开关）" Margin="0,3" />
+                        <TextBlock Grid.Row="2" Text="远程审批" Foreground="{StaticResource MutedBrush}" Margin="0,3" />
+                        <TextBlock Grid.Row="2" Grid.Column="1" Text="尚未启用" Margin="0,3" />
+                    </Grid>
+                    <TextBlock Text="安全设置只影响后续新 Turn，不会改变正在运行的任务。" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,10,0,0" />
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource CardStyle}" Margin="0,0,0,14">
+                <StackPanel>
+                    <TextBlock Text="Codex 消息同步" FontSize="17" FontWeight="SemiBold" />
+                    <CheckBox Content="启用 Codex 消息同步（安静模式）" IsChecked="{Binding MirrorEnabled}" Margin="0,10,0,6" />
+                    <TextBlock Text="{Binding MirrorStatusText}" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,10" />
+                    <GroupBox Header="Telegram" Margin="0,0,0,10">
+                        <StackPanel Margin="10">
+                            <CheckBox Content="启用" IsChecked="{Binding TelegramMirrorEnabled}" />
+                            <TextBlock Text="目标 Chat ID" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,3" />
+                            <TextBox Text="{Binding TelegramMirrorChatId, UpdateSourceTrigger=PropertyChanged}" />
+                        </StackPanel>
+                    </GroupBox>
+                    <GroupBox Header="QQ 官方机器人" Margin="0,0,0,10">
+                        <StackPanel Margin="10">
+                            <CheckBox Content="启用" IsChecked="{Binding QqMirrorEnabled}" />
+                            <ComboBox ItemsSource="{Binding QqMirrorConversationTypes}" SelectedItem="{Binding QqMirrorConversationType}" Width="160" HorizontalAlignment="Left" Margin="0,8,0,3" />
+                            <TextBlock Text="C2C 填 User OpenID；Group 填 Group OpenID（不要填写数字 QQ 号）" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,3" TextWrapping="Wrap" />
+                            <TextBox Text="{Binding QqMirrorOpenId, UpdateSourceTrigger=PropertyChanged}" />
+                            <TextBlock Text="{Binding QqCapabilityNotice}" Foreground="#8B4B00" TextWrapping="Wrap" FontSize="12" Margin="0,7,0,0" />
+                        </StackPanel>
+                    </GroupBox>
+                    <TextBlock Text="自动发送类型" Foreground="{StaticResource MutedBrush}" />
+                    <WrapPanel Margin="0,5,0,8">
+                        <CheckBox Content="同步 Codex 最终回答" IsChecked="{Binding MirrorAssistant}" Margin="0,0,14,0" />
+                        <CheckBox Content="Request User Input" IsChecked="{Binding MirrorInput}" Margin="0,0,14,0" />
+                        <CheckBox Content="错误/停止消息" IsChecked="{Binding MirrorError}" />
+                    </WrapPanel>
+                    <CheckBox Content="远程回复必须包含聊天编号" IsChecked="{Binding RequireThreadNumber}" />
+                </StackPanel>
+            </Border>
+            <StackPanel Orientation="Horizontal">
+                <Button Content="{StaticResource SaveSettings}" Command="{Binding SaveCommand}" Background="{StaticResource AccentBrush}" Foreground="White" />
+                <TextBlock Text="{Binding SaveResult}" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="{StaticResource MutedBrush}" />
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

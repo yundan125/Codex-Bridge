@@ -1,0 +1,70 @@
+<Window x:Class="CloudLight.CodexBridge.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="CloudLight Codex Bridge"
+        Width="1280" Height="800" MinWidth="1040" MinHeight="680"
+        WindowStartupLocation="CenterScreen">
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="210" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <Border Grid.Column="0" Background="{StaticResource SidebarBrush}">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <StackPanel Margin="18,24,18,18">
+                    <TextBlock Text="CloudLight" Foreground="White" FontSize="20" FontWeight="SemiBold" />
+                    <TextBlock Text="Codex Bridge" Foreground="#91A0AF" FontSize="13" Margin="0,3,0,0" />
+                </StackPanel>
+                <StackPanel Grid.Row="1">
+                    <Button Style="{StaticResource SidebarButtonStyle}" Content="{StaticResource NavSessions}" Command="{Binding NavigateCommand}" CommandParameter="sessions" />
+                    <Button Style="{StaticResource SidebarButtonStyle}" Content="{StaticResource NavChannels}" Command="{Binding NavigateCommand}" CommandParameter="channels" />
+                    <Button Style="{StaticResource SidebarButtonStyle}" Content="{StaticResource NavSettings}" Command="{Binding NavigateCommand}" CommandParameter="settings" />
+                    <Button Style="{StaticResource SidebarButtonStyle}" Content="{StaticResource NavLogs}" Command="{Binding NavigateCommand}" CommandParameter="logs" />
+                </StackPanel>
+                <TextBlock Grid.Row="2" Text="第六阶段 · 全会话同步" Foreground="#768696" Margin="20" FontSize="12" />
+            </Grid>
+        </Border>
+
+        <Grid Grid.Column="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="76" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <Border Background="White" BorderBrush="#DDE3EA" BorderThickness="0,0,0,1" Padding="22,14">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <StackPanel Margin="0,0,28,0">
+                            <TextBlock Text="{StaticResource BackendStatus}" Foreground="{StaticResource MutedBrush}" FontSize="12" />
+                            <TextBlock Text="{Binding BackendState}" FontWeight="SemiBold" Margin="0,3,0,0" />
+                        </StackPanel>
+                        <StackPanel Margin="0,0,28,0">
+                            <TextBlock Text="{StaticResource CodexCliStatus}" Foreground="{StaticResource MutedBrush}" FontSize="12" />
+                            <TextBlock Text="{Binding CodexCliState}" FontWeight="SemiBold" Margin="0,3,0,0" />
+                        </StackPanel>
+                        <StackPanel>
+                            <TextBlock Text="{StaticResource AppServerStatus}" Foreground="{StaticResource MutedBrush}" FontSize="12" />
+                            <TextBlock Text="{Binding AppServerState}" FontWeight="SemiBold" Margin="0,3,0,0" />
+                        </StackPanel>
+                    </StackPanel>
+                    <Button Grid.Column="1" Content="{StaticResource Refresh}" Command="{Binding RefreshCommand}" VerticalAlignment="Center" />
+                </Grid>
+            </Border>
+            <ContentControl Grid.Row="1" Content="{Binding CurrentPage}" Margin="18" />
+            <Border Grid.RowSpan="2" Background="#FFF4E5" BorderBrush="#F2C97D" BorderThickness="1"
+                    CornerRadius="6" Padding="12" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                    Margin="20" MaxWidth="620" Visibility="{Binding ErrorVisibility}">
+                <TextBlock Text="{Binding ErrorMessage}" Foreground="#8B4B00" TextWrapping="Wrap" />
+            </Border>
+        </Grid>
+    </Grid>
+</Window>
