@@ -77,6 +77,11 @@ type Update struct {
 	CallbackQuery *CallbackQuery `json:"callback_query"`
 }
 
+type BotCommand struct {
+	Command     string `json:"command"`
+	Description string `json:"description"`
+}
+
 type Client struct {
 	token      string
 	baseURL    string
@@ -228,6 +233,10 @@ func (c *Client) AnswerCallback(ctx context.Context, callbackID, text string) er
 		payload["text"] = truncateRunes(text, 180)
 	}
 	return c.call(ctx, "answerCallbackQuery", payload, nil)
+}
+
+func (c *Client) SetMyCommands(ctx context.Context, commands []BotCommand) error {
+	return c.call(ctx, "setMyCommands", map[string]any{"commands": commands}, nil)
 }
 
 func messagePayload(message channels.OutboundMessage) map[string]any {

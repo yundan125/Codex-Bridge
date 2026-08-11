@@ -15,6 +15,7 @@ import (
 
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/bindings"
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/channels"
+	"cloudlight.dev/codexbridge/bridge-daemon/internal/commandregistry"
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/control"
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/events"
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/interactions"
@@ -305,6 +306,18 @@ func TestTelegramQueriesUseSharedHelpAndNeverStartTurn(t *testing.T) {
 		t.Fatalf("Telegram help did not use shared query semantics: %#v", result)
 	}
 	service.handleCommand(context.Background(), channels.InboundMessage{Address: channels.ChannelAddress{ChannelType: "telegram", ChatID: "1"}}, "/running")
+	commands, err := commandregistry.New(filepath.Join(t.TempDir(), "commands.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	enabled := true
+	if _, err := commands.Create(commandregistry.Mutation{Name: "/任务", DisplayName: "查看正在执行", Description: "查看任务", Action: commandregistry.ActionThreadRunning, Enabled: &enabled}); err != nil {
+		t.Fatal(err)
+	}
+	service.SetCommandRegistry(commands)
+	if custom, handled := service.queryService().Execute(context.Background(), "/任务"); !handled || len(custom.Parts) != 1 || custom.Parts[0] != "当前没有正在执行的 Codex 任务。" {
+		t.Fatalf("Telegram did not resolve custom command: %#v", custom)
+	}
 	if runtime.starts != 0 {
 		t.Fatalf("query started %d Codex Turns", runtime.starts)
 	}

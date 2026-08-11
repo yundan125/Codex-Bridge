@@ -17,6 +17,7 @@
                     <RadioButton Content="概览" Style="{StaticResource NavigationButtonStyle}" GroupName="Navigation" IsChecked="{Binding IsOverviewPage, Mode=OneWay}" Command="{Binding NavigateCommand}" CommandParameter="overview"/>
                     <RadioButton Content="Codex 会话" Style="{StaticResource NavigationButtonStyle}" GroupName="Navigation" IsChecked="{Binding IsSessionsPage, Mode=OneWay}" Command="{Binding NavigateCommand}" CommandParameter="sessions"/>
                     <RadioButton Content="远程渠道" Style="{StaticResource NavigationButtonStyle}" GroupName="Navigation" IsChecked="{Binding IsChannelsPage, Mode=OneWay}" Command="{Binding NavigateCommand}" CommandParameter="channels"/>
+                    <RadioButton Content="指令" Style="{StaticResource NavigationButtonStyle}" GroupName="Navigation" IsChecked="{Binding IsCommandsPage, Mode=OneWay}" Command="{Binding NavigateCommand}" CommandParameter="commands"/>
                     <RadioButton Content="消息同步" Style="{StaticResource NavigationButtonStyle}" GroupName="Navigation" IsChecked="{Binding IsMirrorPage, Mode=OneWay}" Command="{Binding NavigateCommand}" CommandParameter="mirror"/>
                     <RadioButton Content="备份与恢复" Style="{StaticResource NavigationButtonStyle}" GroupName="Navigation" IsChecked="{Binding IsBackupPage, Mode=OneWay}" Command="{Binding NavigateCommand}" CommandParameter="backup"/>
                     <Separator Margin="18,12"/>
@@ -24,7 +25,7 @@
                 </StackPanel>
                 <StackPanel Grid.Row="2" Margin="0,0,0,12">
                     <RadioButton Content="设置" Style="{StaticResource NavigationButtonStyle}" GroupName="Navigation" IsChecked="{Binding IsSettingsPage, Mode=OneWay}" Command="{Binding NavigateCommand}" CommandParameter="settings"/>
-                    <TextBlock Text="v0.7.2" Style="{StaticResource SecondaryTextStyle}" Margin="20,8,0,5"/>
+                    <TextBlock Text="v0.8.0" Style="{StaticResource SecondaryTextStyle}" Margin="20,8,0,5"/>
                 </StackPanel>
             </Grid>
         </Border>

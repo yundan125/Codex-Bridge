@@ -23,7 +23,7 @@ public sealed class MainViewModel : ObservableObject
     private bool _initialized;
 
     public MainViewModel(DaemonProcessManager daemon, BridgeApiClient api, SessionsViewModel sessions,
-        ChannelsViewModel channels, OverviewViewModel overview, MirrorViewModel mirror, BackupViewModel backup,
+        ChannelsViewModel channels, CommandsViewModel commands, OverviewViewModel overview, MirrorViewModel mirror, BackupViewModel backup,
         SettingsViewModel settingsViewModel, LogsViewModel logsViewModel, UserSettings settings,
         SettingsService settingsService, LogService logs)
     {
@@ -31,6 +31,7 @@ public sealed class MainViewModel : ObservableObject
         _api = api;
         Sessions = sessions;
         Channels = channels;
+        Commands = commands;
         Overview = overview;
         Mirror = mirror;
         Backup = backup;
@@ -49,6 +50,7 @@ public sealed class MainViewModel : ObservableObject
 
     public SessionsViewModel Sessions { get; }
     public ChannelsViewModel Channels { get; }
+    public CommandsViewModel Commands { get; }
     public OverviewViewModel Overview { get; }
     public MirrorViewModel Mirror { get; }
     public BackupViewModel Backup { get; }
@@ -57,11 +59,12 @@ public sealed class MainViewModel : ObservableObject
     public ICommand NavigateCommand { get; }
     public ICommand RefreshCommand { get; }
     public string CurrentPageKey { get; private set; }
-    public string PageTitle => CurrentPageKey switch { "sessions" => "Codex 会话", "channels" => "远程渠道", "mirror" => "消息同步", "backup" => "备份与恢复", "settings" => "设置", "logs" => "运行日志", _ => "概览" };
-    public string PageDescription => CurrentPageKey switch { "sessions" => "浏览会话、处理等待事项并继续对话", "channels" => "管理 QQ 机器人与 Telegram", "mirror" => "将 Codex 的最终回答发送到指定渠道", "backup" => "备份或恢复 Codex 与应用数据", "settings" => "管理启动、窗口、外观与 Codex 设置", "logs" => "查看本机运行信息和错误详情", _ => "查看 Codex、远程渠道与消息同步状态" };
+    public string PageTitle => CurrentPageKey switch { "sessions" => "Codex 会话", "channels" => "远程渠道", "commands" => "指令管理", "mirror" => "消息同步", "backup" => "备份与恢复", "settings" => "设置", "logs" => "运行日志", _ => "概览" };
+    public string PageDescription => CurrentPageKey switch { "sessions" => "浏览会话、处理等待事项并继续对话", "channels" => "管理 QQ 机器人与 Telegram", "commands" => "统一管理 QQ 和 Telegram 使用的远程指令", "mirror" => "将 Codex 的最终回答发送到指定渠道", "backup" => "备份或恢复 Codex 与应用数据", "settings" => "管理启动、窗口、外观与 Codex 设置", "logs" => "查看本机运行信息和错误详情", _ => "查看 Codex、远程渠道与消息同步状态" };
     public bool IsOverviewPage => CurrentPageKey == "overview";
     public bool IsSessionsPage => CurrentPageKey == "sessions";
     public bool IsChannelsPage => CurrentPageKey == "channels";
+    public bool IsCommandsPage => CurrentPageKey == "commands";
     public bool IsMirrorPage => CurrentPageKey == "mirror";
     public bool IsBackupPage => CurrentPageKey == "backup";
     public bool IsSettingsPage => CurrentPageKey == "settings";
@@ -85,6 +88,7 @@ public sealed class MainViewModel : ObservableObject
             await RefreshAsync();
             await Settings.RefreshMirrorAsync();
             if (CurrentPageKey == "channels") await Channels.EnsureInitializedAsync(_lifetime.Token);
+            if (CurrentPageKey == "commands") await Commands.EnsureInitializedAsync(_lifetime.Token);
             _initialized = true;
         }
         catch (Exception exception)
@@ -105,20 +109,21 @@ public sealed class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(CurrentPageKey));
         OnPropertyChanged(nameof(PageTitle));
         OnPropertyChanged(nameof(PageDescription));
-        OnPropertyChanged(nameof(IsOverviewPage)); OnPropertyChanged(nameof(IsSessionsPage)); OnPropertyChanged(nameof(IsChannelsPage));
+        OnPropertyChanged(nameof(IsOverviewPage)); OnPropertyChanged(nameof(IsSessionsPage)); OnPropertyChanged(nameof(IsChannelsPage)); OnPropertyChanged(nameof(IsCommandsPage));
         OnPropertyChanged(nameof(IsMirrorPage)); OnPropertyChanged(nameof(IsBackupPage)); OnPropertyChanged(nameof(IsSettingsPage)); OnPropertyChanged(nameof(IsLogsPage));
         _settings.LastPage = CurrentPageKey;
         _ = _settingsService.SaveAsync(_settings);
         if (ReferenceEquals(CurrentPage, Channels)) _ = Channels.EnsureInitializedAsync(_lifetime.Token);
+        if (ReferenceEquals(CurrentPage, Commands)) _ = Commands.EnsureInitializedAsync(_lifetime.Token);
         if (ReferenceEquals(CurrentPage, Mirror)) _ = Settings.RefreshMirrorAsync();
     }
 
     private object ResolvePage(string key) => key switch
     {
-        "sessions" => Sessions, "channels" => Channels, "mirror" => Mirror, "backup" => Backup,
+        "sessions" => Sessions, "channels" => Channels, "commands" => Commands, "mirror" => Mirror, "backup" => Backup,
         "settings" => Settings, "logs" => Logs, _ => Overview
     };
-    private static string NormalizePage(string? key) => key is "overview" or "sessions" or "channels" or "mirror" or "backup" or "settings" or "logs" ? key : "overview";
+    private static string NormalizePage(string? key) => key is "overview" or "sessions" or "channels" or "commands" or "mirror" or "backup" or "settings" or "logs" ? key : "overview";
 
     public async Task RefreshAsync()
     {
@@ -158,6 +163,7 @@ public sealed class MainViewModel : ObservableObject
         _api.StartEventStream();
         await RefreshAsync();
         if (Channels.IsContentReady) await Channels.RefreshAsync(_lifetime.Token, preserveOperationMessage: true);
+        await Commands.RefreshAsync(_lifetime.Token);
     }
 
     private void OnEventReceived(object? sender, BridgeEvent bridgeEvent)

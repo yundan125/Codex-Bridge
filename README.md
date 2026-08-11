@@ -2,7 +2,7 @@
 
 CloudLight Codex Bridge 是面向 Windows 的 Codex 桌面助手。它可以浏览并继续现有 Codex 会话，通过稳定的 `#N` 聊天编号从 Telegram 或 QQ 机器人发送任务，并把 Codex 的最终回答同步到指定渠道。
 
-当前版本：`0.7.2`
+当前版本：`0.8.0`
 
 ## 主要能力
 
@@ -26,22 +26,22 @@ CloudLight Codex Bridge 是面向 Windows 的 Codex 桌面助手。它可以浏�
 
 ## 下载与安装
 
-0.7.2 的发布目录：
+0.8.0 的发布目录：
 
 ```text
-artifacts\win-x64-0.7.2
+artifacts\win-x64-0.8.0
 ```
 
 完整安装包：
 
 ```text
-artifacts\win-x64-0.7.2\CloudLight-CodexBridge-Setup-0.7.2-win-x64.exe
+artifacts\win-x64-0.8.0\CloudLight-CodexBridge-Setup-0.8.0-win-x64.exe
 ```
 
 便携版可以直接运行：
 
 ```text
-artifacts\win-x64-0.7.2\CloudLight.CodexBridge.exe
+artifacts\win-x64-0.8.0\CloudLight.CodexBridge.exe
 ```
 
 安装器只为当前 Windows 用户安装，不需要管理员权限。卸载软件不会删除 Codex 数据、应用设置、关联会话、聊天编号、日志或已保存的机器人密钥。
@@ -124,6 +124,8 @@ artifacts\win-x64-0.7.2\CloudLight.CodexBridge.exe
 | `/stop` | 停止当前聊天发起的任务 |
 | `/cancel` | 取消当前正在等待的回答 |
 
+这些是首次启动时自动加载并默认锁定的系统指令。“指令”页面可以逐条解锁、改名、添加别名、停用或恢复，也可以创建任意数量映射到受支持功能的自定义指令。QQ 与 Telegram 始终读取同一个有效配置；中文指令即使不符合 Telegram 菜单规则，仍可直接在聊天文本中使用。
+
 `/threads`、`/thread`、`/history`、`/running`、`/waiting`、`/recent`、`/failed`、`/quota` 和 `/status` 均由 Bridge 在本地直接查询，不会向 Codex 提交新任务、创建 User Message、改变会话或推进消息同步游标。查询命令不要求当前聊天先执行 `/bind`，但仍沿用 QQ 与 Telegram 已配置的允许账号列表。
 
 `/quota` 只显示当前 Codex App Server 的 `account/rateLimits/read` 实际返回值，不根据 Token 用量估算，也不会抓取网页。如果当前 Codex 版本、登录方式或账号没有返回可读额度，机器人会明确说明当前无法读取。
@@ -187,13 +189,13 @@ QQ 配置中仍会使用 OpenID，这是 QQ 开放平台提供的用户或群聊
 
 开发环境与构建说明见 [docs/development.md](docs/development.md)，架构说明见 [docs/architecture.md](docs/architecture.md)。
 
-生成 0.7.2 Release：
+生成 0.8.0 Release：
 
 ```powershell
-.\scripts\build.ps1 -Version 0.7.2
+.\scripts\build.ps1 -Version 0.8.0
 ```
 
-脚本输出到 `artifacts\win-x64-0.7.2`，并拒绝覆盖已存在的版本目录。构建不会执行 Git 提交、标签或推送。
+脚本输出到 `artifacts\win-x64-0.8.0`，并拒绝覆盖已存在的版本目录。构建不会执行 Git 提交、标签或推送。
 
 ## 许可证与第三方说明
 
@@ -204,4 +206,4 @@ QQ 配置中仍会使用 OpenID，这是 QQ 开放平台提供的用户或群聊
 - [licenses/gorilla-websocket-LICENSE.txt](licenses/gorilla-websocket-LICENSE.txt)
 - [docs/upstream-sources.md](docs/upstream-sources.md)
 
-0.7.2 安装包尚未进行商业代码签名，也不包含自动更新。
+0.8.0 安装包尚未进行商业代码签名，也不包含自动更新。

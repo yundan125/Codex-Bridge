@@ -43,7 +43,7 @@ func (a *Adapter) connectGateway(parent context.Context, runID uint64, resume bo
 
 	ctx, cancel := context.WithTimeout(parent, defaultConnectTimeout)
 	defer cancel()
-	headers := http.Header{"User-Agent": []string{"CloudLight-Codex-Bridge/0.7.2"}}
+	headers := http.Header{"User-Agent": []string{"CloudLight-Codex-Bridge/0.8.0"}}
 	conn, response, err := dialer.DialContext(ctx, gatewayURL, headers)
 	if err != nil {
 		if response != nil && response.StatusCode == http.StatusTooManyRequests {

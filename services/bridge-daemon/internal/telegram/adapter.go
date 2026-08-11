@@ -294,6 +294,16 @@ func (a *Adapter) SetEventHandler(handler func(AdapterEvent)) {
 	a.mu.Unlock()
 }
 
+func (a *Adapter) SyncCommands(ctx context.Context, commands []BotCommand) error {
+	a.mu.RLock()
+	client, running := a.client, a.status.Running && a.status.Connected
+	a.mu.RUnlock()
+	if !running || client == nil {
+		return nil
+	}
+	return client.SetMyCommands(ctx, commands)
+}
+
 func (a *Adapter) SetBindingSummary(summaries []string) {
 	a.mu.Lock()
 	a.status.BindingCount = len(summaries)

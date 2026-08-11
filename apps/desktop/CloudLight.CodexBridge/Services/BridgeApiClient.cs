@@ -56,6 +56,24 @@ public sealed class BridgeApiClient(LogService logs) : IDisposable
     public Task<BridgeStatus> UpdateSecurityAsync(string sandboxMode, CancellationToken cancellationToken = default) =>
         SendJsonAsync<BridgeStatus>(HttpMethod.Put, "/api/v1/settings/security", new SecuritySettingsRequest { SandboxMode = sandboxMode }, cancellationToken);
 
+    public Task<RemoteCommandListResponse> GetCommandsAsync(CancellationToken cancellationToken = default) =>
+        GetAsync<RemoteCommandListResponse>("/api/v1/commands", cancellationToken);
+
+    public Task<RemoteCommandDefinition> CreateCommandAsync(RemoteCommandMutation input, CancellationToken cancellationToken = default) =>
+        SendJsonAsync<RemoteCommandDefinition>(HttpMethod.Post, "/api/v1/commands", input, cancellationToken);
+
+    public Task<RemoteCommandDefinition> UpdateCommandAsync(string id, RemoteCommandMutation input, CancellationToken cancellationToken = default) =>
+        SendJsonAsync<RemoteCommandDefinition>(HttpMethod.Put, $"/api/v1/commands/{Uri.EscapeDataString(id)}", input, cancellationToken);
+
+    public Task<RemoteCommandDefinition> SetCommandLockedAsync(string id, bool locked, CancellationToken cancellationToken = default) =>
+        SendJsonAsync<RemoteCommandDefinition>(HttpMethod.Post, $"/api/v1/commands/{Uri.EscapeDataString(id)}/{(locked ? "lock" : "unlock")}", null, cancellationToken);
+
+    public Task<RemoteCommandDefinition> RestoreCommandAsync(string id, CancellationToken cancellationToken = default) =>
+        SendJsonAsync<RemoteCommandDefinition>(HttpMethod.Post, $"/api/v1/commands/{Uri.EscapeDataString(id)}/restore", null, cancellationToken);
+
+    public Task DeleteCommandAsync(string id, CancellationToken cancellationToken = default) =>
+        SendNoContentAsync(HttpMethod.Delete, $"/api/v1/commands/{Uri.EscapeDataString(id)}", cancellationToken);
+
 	public Task<MirrorStatus> GetMirrorAsync(CancellationToken cancellationToken = default) => GetAsync<MirrorStatus>("/api/v1/mirror", cancellationToken);
 	public Task<MirrorStatus> ConfigureMirrorAsync(MirrorConfig input, CancellationToken cancellationToken = default) => SendJsonAsync<MirrorStatus>(HttpMethod.Put, "/api/v1/mirror", input, cancellationToken);
 

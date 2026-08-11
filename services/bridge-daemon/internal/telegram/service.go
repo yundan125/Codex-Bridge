@@ -15,6 +15,7 @@ import (
 
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/bindings"
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/channels"
+	"cloudlight.dev/codexbridge/bridge-daemon/internal/commandregistry"
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/control"
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/events"
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/interactions"
@@ -102,6 +103,7 @@ type Service struct {
 	broker   *events.Broker
 	logger   *bridgelog.SafeLogger
 	registry *threadregistry.Registry
+	commands *commandregistry.Registry
 	queries  *bridgequery.Service
 
 	ctx    context.Context
@@ -127,8 +129,8 @@ func NewService(controlService Control, runtime Runtime, repository *bindings.Re
 	}
 	service := &Service{
 		control: controlService, runtime: runtime, bindings: repository, broker: broker, logger: logger, registry: registry,
-		queries: bridgequery.New(controlService, runtime, registry),
-		ctx:     ctx, cancel: cancel, done: make(chan struct{}), routes: make(map[string]*turnRoute),
+		commands: commandregistry.NewInMemory(),
+		ctx:      ctx, cancel: cancel, done: make(chan struct{}), routes: make(map[string]*turnRoute),
 		callbacks: make(map[string]callbackAction), waits: make(map[string]inputWait), sessions: make(map[string]*multiSession), flows: make(map[string]*interactionFlow), interactionNotified: make(map[string]bool),
 	}
 	service.adapter = NewAdapter(service.HandleMessage)
@@ -138,6 +140,17 @@ func NewService(controlService Control, runtime Runtime, repository *bindings.Re
 }
 
 func (s *Service) Adapter() *Adapter { return s.adapter }
+
+func (s *Service) SetCommandRegistry(commands *commandregistry.Registry) {
+	if commands == nil {
+		return
+	}
+	s.mu.Lock()
+	s.commands = commands
+	s.queries = bridgequery.New(s.control, s.runtime, s.registry, commands)
+	s.mu.Unlock()
+	commands.AddChangeListener(func() { go s.syncCommandMenu() })
+}
 
 func (s *Service) Configure(request ConfigureRequest) (AdapterStatus, error) {
 	var err error
@@ -187,6 +200,9 @@ func (s *Service) Configure(request ConfigureRequest) (AdapterStatus, error) {
 		s.publishChannelState(events.ChannelConnected, "")
 	}
 	s.publishChannelState(events.ChannelStatusChanged, "")
+	if status.Running {
+		go s.syncCommandMenu()
+	}
 	return status, nil
 }
 
@@ -200,7 +216,38 @@ func (s *Service) Start(ctx context.Context) error {
 	s.broker.Publish(events.TelegramStarted, map[string]any{"botId": shortID(s.adapter.TelegramStatus().BotID)})
 	s.broker.Publish(events.TelegramPollingStarted, map[string]any{"channelType": "telegram"})
 	s.publishChannelState(events.ChannelConnected, "")
+	go s.syncCommandMenu()
 	return nil
+}
+
+func (s *Service) syncCommandMenu() {
+	s.mu.Lock()
+	commands := s.commands
+	s.mu.Unlock()
+	if commands == nil {
+		return
+	}
+	menu := make([]BotCommand, 0, 100)
+	for _, item := range commands.List().Commands {
+		if !item.Enabled || !item.TelegramMenuEligible {
+			continue
+		}
+		description := strings.TrimSpace(item.DisplayName)
+		if description == "" {
+			description = strings.TrimSpace(item.Description)
+		}
+		for _, trigger := range append([]string{item.Name}, item.Aliases...) {
+			if len(menu) >= 100 || !commandregistry.TelegramMenuTriggerEligible(trigger) {
+				continue
+			}
+			menu = append(menu, BotCommand{Command: strings.TrimPrefix(trigger, "/"), Description: truncateRunes(description, 256)})
+		}
+	}
+	ctx, cancel := context.WithTimeout(s.ctx, 15*time.Second)
+	defer cancel()
+	if err := s.adapter.SyncCommands(ctx, menu); err != nil && s.logger != nil {
+		s.logger.Printf("Telegram command menu sync failed: %s", errorCategory(err))
+	}
 }
 
 func (s *Service) Stop(ctx context.Context) error {
@@ -322,61 +369,68 @@ func (s *Service) handleNumbered(ctx context.Context, message channels.InboundMe
 }
 
 func (s *Service) handleTargetCommand(ctx context.Context, message channels.InboundMessage, record threadregistry.Record, text string) {
-	fields := strings.Fields(text)
-	command := strings.ToLower(fields[0])
-	switch command {
-	case "/status", "/thread":
-		s.runQuery(ctx, message, "/thread "+strconv.Itoa(record.Number))
-	case "/history":
-		queryText := "/history " + strconv.Itoa(record.Number)
-		if len(fields) > 1 {
-			queryText += " " + strings.Join(fields[1:], " ")
-		}
-		s.runQuery(ctx, message, queryText)
-	case "/stop":
+	invocation, found := s.commandRegistry().Resolve(text)
+	if !found {
+		s.send(ctx, message.Address, fmt.Sprintf("#%d 不支持该指令。", record.Number))
+		return
+	}
+	if !invocation.Definition.Enabled {
+		s.send(ctx, message.Address, "指令 "+invocation.Definition.Name+" 当前已停用。")
+		return
+	}
+	switch invocation.Definition.Action {
+	case commandregistry.ActionBridgeStatus, commandregistry.ActionThreadInfo:
+		s.runQueryAction(ctx, message, commandregistry.ActionThreadInfo, []string{strconv.Itoa(record.Number)})
+	case commandregistry.ActionThreadHistory:
+		s.runQueryAction(ctx, message, commandregistry.ActionThreadHistory, append([]string{strconv.Itoa(record.Number)}, invocation.Arguments...))
+	case commandregistry.ActionThreadStop:
 		s.stopThread(ctx, message, record.ThreadID)
-	case "/cancel":
+	case commandregistry.ActionInteractionCancel:
 		s.cancelThreadInteraction(ctx, message, record.ThreadID)
 	default:
-		s.send(ctx, message.Address, fmt.Sprintf("#%d 不支持命令 %s。", record.Number, command))
+		s.send(ctx, message.Address, fmt.Sprintf("指令 %s 不支持 #编号 会话上下文。", invocation.Definition.Name))
 	}
 }
 
 func (s *Service) handleCommand(ctx context.Context, message channels.InboundMessage, text string) {
-	parts := strings.Fields(text)
-	command := strings.ToLower(strings.SplitN(parts[0], "@", 2)[0])
-	argument := ""
-	if len(parts) > 1 {
-		argument = strings.TrimSpace(strings.Join(parts[1:], " "))
+	invocation, found := s.commandRegistry().Resolve(text)
+	if !found {
+		s.send(ctx, message.Address, "Unknown command. Use /help.")
+		return
 	}
-	if result, handled := s.queryService().Execute(ctx, text); handled {
+	if !invocation.Definition.Enabled {
+		s.send(ctx, message.Address, "指令 "+invocation.Definition.Name+" 当前已停用。")
+		return
+	}
+	argument := strings.TrimSpace(strings.Join(invocation.Arguments, " "))
+	if result, handled := s.queryService().ExecuteAction(ctx, invocation.Definition.Action, invocation.Arguments); handled {
 		s.sendQuery(ctx, message.Address, result)
 		return
 	}
-	switch command {
-	case "/start":
+	switch invocation.Definition.Action {
+	case commandregistry.ActionBridgeStart:
 		if binding, ok := s.findBinding(message.Address); ok {
 			s.send(ctx, message.Address, "CloudLight Codex Bridge is ready. This chat/topic is bound to Thread "+shortID(binding.ThreadID)+".\nUse /help to list commands.")
 		} else {
 			s.send(ctx, message.Address, "CloudLight Codex Bridge is ready. This chat/topic is not bound yet.\nUse /threads to choose a Thread, or /bind <full-thread-id>.\nUse /help to list commands.")
 		}
-	case "/bind":
+	case commandregistry.ActionThreadBind:
 		if argument == "" {
 			s.send(ctx, message.Address, "Usage: /bind <full-thread-id>. Use /threads to pick from recent Threads.")
 			return
 		}
 		s.bind(ctx, message, argument)
-	case "/unbind":
+	case commandregistry.ActionThreadUnbind:
 		s.unbind(ctx, message)
-	case "/current":
+	case commandregistry.ActionThreadCurrent:
 		s.current(ctx, message)
-	case "/stop":
+	case commandregistry.ActionThreadStop:
 		if argument != "" {
 			s.commandThread(ctx, message, argument, "stop")
 		} else {
 			s.stopTurn(ctx, message)
 		}
-	case "/cancel":
+	case commandregistry.ActionInteractionCancel:
 		if argument != "" {
 			s.commandThread(ctx, message, argument, "cancel")
 		} else {
@@ -1128,9 +1182,24 @@ func (s *Service) queryService() *bridgequery.Service {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.queries == nil {
-		s.queries = bridgequery.New(s.control, s.runtime, s.registry)
+		s.queries = bridgequery.New(s.control, s.runtime, s.registry, s.commands)
 	}
 	return s.queries
+}
+
+func (s *Service) commandRegistry() *commandregistry.Registry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.commands == nil {
+		s.commands = commandregistry.NewInMemory()
+	}
+	return s.commands
+}
+
+func (s *Service) runQueryAction(ctx context.Context, message channels.InboundMessage, action string, arguments []string) {
+	if result, handled := s.queryService().ExecuteAction(ctx, action, arguments); handled {
+		s.sendQuery(ctx, message.Address, result)
+	}
 }
 
 func (s *Service) runQuery(ctx context.Context, message channels.InboundMessage, text string) {

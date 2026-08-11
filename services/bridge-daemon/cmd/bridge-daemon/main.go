@@ -15,6 +15,7 @@ import (
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/api"
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/bindings"
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/channels"
+	"cloudlight.dev/codexbridge/bridge-daemon/internal/commandregistry"
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/config"
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/control"
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/events"
@@ -26,7 +27,7 @@ import (
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/threadregistry"
 )
 
-var version = "0.7.2"
+var version = "0.8.0"
 
 func main() {
 	options := config.Options{Version: version}
@@ -61,6 +62,11 @@ func main() {
 		fmt.Fprintln(os.Stderr, "bridge-daemon: open thread numbers:", err)
 		os.Exit(1)
 	}
+	commandRegistry, err := commandregistry.New(paths.CommandsFile)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "bridge-daemon: open commands:", err)
+		os.Exit(1)
+	}
 
 	listener, err := net.Listen("tcp4", options.Listen)
 	if err != nil {
@@ -78,6 +84,8 @@ func main() {
 	controlService := control.NewService(manager, manager, threadRegistry)
 	telegramService := telegram.NewService(controlService, manager, bindingRepository, broker, logger, threadRegistry)
 	qqbotService := qqbot.NewService(controlService, manager, bindingRepository, broker, logger, threadRegistry)
+	telegramService.SetCommandRegistry(commandRegistry)
+	qqbotService.SetCommandRegistry(commandRegistry)
 	mirrorService, err := mirror.New(paths.MirrorFile, controlService, manager, threadRegistry, broker, logger,
 		mirror.Target{Status: func() (string, bool) {
 			status := telegramService.Adapter().TelegramStatus()
@@ -97,7 +105,7 @@ func main() {
 		_ = listener.Close()
 		os.Exit(1)
 	}
-	server := api.New(options.Token, manager, controlService, bindingRepository, broker, logger, telegramService, qqbotService, mirrorService)
+	server := api.New(options.Token, manager, controlService, bindingRepository, broker, logger, telegramService, qqbotService, mirrorService, commandRegistry)
 
 	serveErrors := make(chan error, 1)
 	go func() { serveErrors <- server.Serve(listener) }()

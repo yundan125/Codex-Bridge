@@ -44,6 +44,7 @@ public partial class App : Application
         var daemon = new DaemonProcessManager(logs);
         var api = new BridgeApiClient(logs);
         var sessions = new SessionsViewModel(api, logs);
+        var commands = new CommandsViewModel(api, logs);
         var channels = new ChannelsViewModel(api, settingsService, new TelegramSecretService(), new QqSecretService(), settings, logs);
         var startup = new StartupService();
         var settingsViewModel = new SettingsViewModel(settingsService, api, settings, logs, startup);
@@ -51,7 +52,7 @@ public partial class App : Application
         var overview = new OverviewViewModel(sessions, channels, settingsViewModel);
         var mirror = new MirrorViewModel(settingsViewModel);
         var backup = new BackupViewModel(new BackupService(settingsService), logs);
-        _mainViewModel = new MainViewModel(daemon, api, sessions, channels, overview, mirror, backup,
+        _mainViewModel = new MainViewModel(daemon, api, sessions, channels, commands, overview, mirror, backup,
             settingsViewModel, logsViewModel, settings, settingsService, logs);
         backup.StopRuntimeAsync = _mainViewModel.PauseRuntimeAsync;
         backup.RestartRuntimeAsync = _mainViewModel.ResumeRuntimeAsync;

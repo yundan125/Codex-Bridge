@@ -3,11 +3,13 @@ package qqbot
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/bindings"
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/channels"
+	"cloudlight.dev/codexbridge/bridge-daemon/internal/commandregistry"
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/control"
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/events"
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/interactions"
@@ -173,6 +175,37 @@ func TestQQQueriesUseSharedHelpAndNeverStartTurn(t *testing.T) {
 	}
 	if len(adapter.sent) != 1 || adapter.sent[0].Text != "当前没有正在执行的 Codex 任务。" {
 		t.Fatalf("unexpected QQ query output: %#v", adapter.sent)
+	}
+}
+
+func TestQQCustomCommandAndNumberedContextUseSharedRegistry(t *testing.T) {
+	thread := control.ThreadSummary{ThreadID: "thread-1", Number: 1, Title: "One", Status: "idle"}
+	service, adapter, _ := newServiceFixture(t, &fakeControl{threads: []control.ThreadSummary{thread}}, &fakeRuntime{})
+	commands, err := commandregistry.New(filepath.Join(t.TempDir(), "commands.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	enabled := true
+	if _, err := commands.Create(commandregistry.Mutation{Name: "/任务", DisplayName: "查看正在执行", Description: "查看任务", Action: commandregistry.ActionThreadRunning, Enabled: &enabled}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := commands.Create(commandregistry.Mutation{Name: "/详情", DisplayName: "查看会话详情", Description: "查看会话", Action: commandregistry.ActionThreadInfo, Enabled: &enabled}); err != nil {
+		t.Fatal(err)
+	}
+	numbers, err := threadregistry.New(filepath.Join(t.TempDir(), "thread-numbers.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := numbers.Ensure(threadregistry.Metadata{ThreadID: "thread-1", Title: "One", CreatedAt: "2026-01-01T00:00:00Z"}); err != nil {
+		t.Fatal(err)
+	}
+	service.registry = numbers
+	service.SetCommandRegistry(commands)
+	address := channels.ChannelAddress{ChannelType: "qqbot", AccountID: "100", ConversationType: "c2c", ChatID: "200"}
+	service.HandleMessage(context.Background(), channels.InboundMessage{Address: address, UserID: "200", Text: "/任务"})
+	service.HandleMessage(context.Background(), channels.InboundMessage{Address: address, UserID: "200", Text: "#1 /详情"})
+	if len(adapter.sent) != 2 || adapter.sent[0].Text != "当前没有正在执行的 Codex 任务。" || !strings.Contains(adapter.sent[1].Text, "#1 One") {
+		t.Fatalf("unexpected custom command output: %#v", adapter.sent)
 	}
 }
 

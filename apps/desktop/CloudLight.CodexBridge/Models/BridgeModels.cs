@@ -255,6 +255,50 @@ public sealed class SecuritySettingsRequest
     public string SandboxMode { get; set; } = "workspace-write";
 }
 
+public sealed class RemoteCommandListResponse
+{
+    public int SchemaVersion { get; set; }
+    public List<RemoteCommandDefinition> Commands { get; set; } = [];
+    public List<RemoteCommandAction> Actions { get; set; } = [];
+}
+
+public sealed class RemoteCommandAction
+{
+    public string Id { get; set; } = "";
+    public string DisplayName { get; set; } = "";
+    public bool TargetSupport { get; set; }
+}
+
+public sealed class RemoteCommandDefinition
+{
+    public string Id { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string DisplayName { get; set; } = "";
+    public List<string> Aliases { get; set; } = [];
+    public string Description { get; set; } = "";
+    public string ParameterHelp { get; set; } = "";
+    public string Action { get; set; } = "";
+    public bool BuiltIn { get; set; }
+    public bool Locked { get; set; }
+    public bool Enabled { get; set; }
+    public bool Modified { get; set; }
+    public bool CanDelete { get; set; }
+    public bool CanRestore { get; set; }
+    public bool TelegramMenuEligible { get; set; }
+    public string TelegramMenuNotice { get; set; } = "";
+}
+
+public sealed class RemoteCommandMutation
+{
+    public string Name { get; set; } = "";
+    public string DisplayName { get; set; } = "";
+    public List<string> Aliases { get; set; } = [];
+    public string Description { get; set; } = "";
+    public string ParameterHelp { get; set; } = "";
+    public string Action { get; set; } = "";
+    public bool Enabled { get; set; } = true;
+}
+
 public sealed class MirrorMessageTypes
 {
 	public bool User { get; set; }

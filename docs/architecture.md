@@ -1,6 +1,6 @@
 # 架构
 
-CloudLight Codex Bridge 0.7.2 由 WPF、仅监听回环地址的 Go daemon、Codex App Server、Thread Number Registry、Mirror Service、统一只读 Query Service、Telegram Adapter 与 QQ Official Bot Adapter 组成。WPF 只消费本机 DTO/SSE；平台原始类型不会进入 Runtime、Binding Repository 或 Codex 控制层。
+CloudLight Codex Bridge 0.8.0 由 WPF、仅监听回环地址的 Go daemon、Codex App Server、Thread Number Registry、统一远程指令注册表、Mirror Service、统一只读 Query Service、Telegram Adapter 与 QQ Official Bot Adapter 组成。WPF 只消费本机 DTO/SSE；平台原始类型不会进入 Runtime、Binding Repository 或 Codex 控制层。
 
 ```mermaid
 flowchart LR
@@ -32,7 +32,9 @@ C2C 要求 User OpenID 在允许列表；群聊同时要求 Group OpenID 与 Mem
 
 Binding Repository v3 支持 `telegram/default`、`qqbot/c2c` 和 `qqbot/group`。旧 `qq/private|group` 数据升级后保留为禁用且 `legacy=true`，只读展示，不参与查找或创建。
 
-命令和普通文本沿用现有控制/Runtime。`/threads` 的序号缓存以完整 QQ 会话地址隔离并在 5 分钟到期。普通文本必须命中真实 Binding、真实 Thread 且 Thread 可发送，随后调用 Runtime `StartTurn`，不携带任何安全策略覆盖。
+QQ 与 Telegram 共用 `internal/commandregistry` 的有效指令快照。程序内置默认定义只保存稳定 Action ID；`data/commands.json` 仅保存 BuiltIn 覆盖、锁定状态、自定义指令和 CreatedBaseline。命令名称、别名与参数先解析为 Action，再进入公共查询或原有控制处理器；`/help` 从已启用定义动态生成。升级新增 BuiltIn 会自动合并，单条恢复不会重写其他记录。
+
+`#N` 前缀先由 Thread Number Registry 解析，再把目标会话上下文交给同一指令注册表。`/threads` 的序号缓存以完整 QQ 会话地址隔离并在 5 分钟到期。普通文本必须命中真实 Binding、真实 Thread 且 Thread 可发送，随后调用 Runtime `StartTurn`，不携带任何安全策略覆盖。
 
 Turn 仍经历 `accepted → running → completed-unverified → persisted` 等持久化验证状态；只有 `persisted` 才重新读取正式 Thread assistant message。`persistence-failed`、`thread-mismatch` 或 `failed` 只返回安全错误，不使用 delta 作为最终结果。
 

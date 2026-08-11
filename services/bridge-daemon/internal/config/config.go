@@ -26,6 +26,7 @@ type Paths struct {
 	BindingsFile      string
 	ThreadNumbersFile string
 	MirrorFile        string
+	CommandsFile      string
 }
 
 func (o Options) Validate() error {
@@ -70,5 +71,6 @@ func UserPaths() (Paths, error) {
 		BindingsFile:      filepath.Join(dataDir, "bindings.json"),
 		ThreadNumbersFile: filepath.Join(stateDir, "thread-numbers.json"),
 		MirrorFile:        filepath.Join(stateDir, "mirror-state.json"),
+		CommandsFile:      filepath.Join(stateDir, "commands.json"),
 	}, nil
 }

@@ -10,49 +10,14 @@ import (
 	"sync"
 	"time"
 
+	"cloudlight.dev/codexbridge/bridge-daemon/internal/commandregistry"
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/control"
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/interactions"
 	bridgeruntime "cloudlight.dev/codexbridge/bridge-daemon/internal/runtime"
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/threadregistry"
 )
 
-const HelpText = `常用命令：
-/threads [页码]
-查看聊天编号和标题
-
-/thread <编号>
-查看指定聊天
-
-/history <编号> [数量]
-查看最近聊天记录，默认 3 轮
-
-/running
-查看正在执行的任务
-
-/waiting
-查看等待处理的任务
-
-/recent
-查看最近活动
-
-/failed
-查看最近失败的任务
-
-/quota
-查看 Codex 使用额度
-
-/status
-查看连接状态
-
-发送任务：
-#63 继续修改这个功能
-
-其他：
-/bind
-/unbind
-/current
-/stop
-/cancel`
+var HelpText = commandregistry.NewInMemory().HelpText()
 
 type Control interface {
 	ListThreads(context.Context, int, string) (control.ThreadList, error)
@@ -79,40 +44,50 @@ type Service struct {
 	control  Control
 	runtime  Runtime
 	registry *threadregistry.Registry
+	commands *commandregistry.Registry
 	now      func() time.Time
 }
 
-func New(controlService Control, runtime Runtime, registry *threadregistry.Registry) *Service {
-	return &Service{control: controlService, runtime: runtime, registry: registry, now: time.Now}
+func New(controlService Control, runtime Runtime, registry *threadregistry.Registry, commandRegistries ...*commandregistry.Registry) *Service {
+	commands := commandregistry.NewInMemory()
+	if len(commandRegistries) > 0 && commandRegistries[0] != nil {
+		commands = commandRegistries[0]
+	}
+	return &Service{control: controlService, runtime: runtime, registry: registry, commands: commands, now: time.Now}
 }
 
 func (s *Service) Execute(ctx context.Context, text string) (Result, bool) {
-	fields := strings.Fields(strings.TrimSpace(text))
-	if len(fields) == 0 {
+	invocation, found := s.commands.Resolve(text)
+	if !found {
 		return Result{}, false
 	}
-	command := strings.ToLower(strings.SplitN(fields[0], "@", 2)[0])
-	arguments := fields[1:]
-	switch command {
-	case "/help", "/commands":
-		return one(HelpText), true
-	case "/threads":
+	if !invocation.Definition.Enabled {
+		return one("指令 " + invocation.Definition.Name + " 当前已停用。"), true
+	}
+	return s.ExecuteAction(ctx, invocation.Definition.Action, invocation.Arguments)
+}
+
+func (s *Service) ExecuteAction(ctx context.Context, action string, arguments []string) (Result, bool) {
+	switch action {
+	case commandregistry.ActionBridgeHelp:
+		return one(s.commands.HelpText()), true
+	case commandregistry.ActionThreadsList:
 		return one(s.threads(ctx, arguments)), true
-	case "/thread":
+	case commandregistry.ActionThreadInfo:
 		return one(s.threadInfo(ctx, arguments)), true
-	case "/history":
+	case commandregistry.ActionThreadHistory:
 		return s.history(ctx, arguments), true
-	case "/running":
+	case commandregistry.ActionThreadRunning:
 		return one(s.running(ctx, arguments)), true
-	case "/waiting":
+	case commandregistry.ActionThreadWaiting:
 		return one(s.waiting(ctx, arguments)), true
-	case "/recent":
+	case commandregistry.ActionThreadRecent:
 		return one(s.recent(ctx, arguments)), true
-	case "/failed":
+	case commandregistry.ActionThreadFailed:
 		return one(s.failed(ctx, arguments)), true
-	case "/quota":
+	case commandregistry.ActionAccountQuota:
 		return one(s.quota(ctx, arguments)), true
-	case "/status":
+	case commandregistry.ActionBridgeStatus:
 		if len(arguments) > 0 {
 			return one(s.threadInfo(ctx, arguments)), true
 		}

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/bindings"
+	"cloudlight.dev/codexbridge/bridge-daemon/internal/commandregistry"
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/control"
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/events"
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/interactions"
@@ -35,11 +36,15 @@ type Server struct {
 	telegram *telegram.Service
 	qqbot    *qqbot.Service
 	mirror   *mirror.Service
+	commands *commandregistry.Registry
 	http     *http.Server
 }
 
-func New(token string, runtimeManager *bridgeruntime.Manager, controlService *control.Service, bindingRepository *bindings.Repository, broker *events.Broker, logger *bridgelog.SafeLogger, telegramService *telegram.Service, qqbotService *qqbot.Service, mirrorService *mirror.Service) *Server {
+func New(token string, runtimeManager *bridgeruntime.Manager, controlService *control.Service, bindingRepository *bindings.Repository, broker *events.Broker, logger *bridgelog.SafeLogger, telegramService *telegram.Service, qqbotService *qqbot.Service, mirrorService *mirror.Service, registries ...*commandregistry.Registry) *Server {
 	server := &Server{token: token, runtime: runtimeManager, control: controlService, bindings: bindingRepository, broker: broker, logger: logger, telegram: telegramService, qqbot: qqbotService, mirror: mirrorService}
+	if len(registries) > 0 {
+		server.commands = registries[0]
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", server.health)
 	mux.HandleFunc("GET /api/v1/status", server.authorized(server.status))
@@ -55,6 +60,13 @@ func New(token string, runtimeManager *bridgeruntime.Manager, controlService *co
 	mux.HandleFunc("POST /api/v1/bindings", server.authorized(server.createBinding))
 	mux.HandleFunc("DELETE /api/v1/bindings/{bindingId}", server.authorized(server.deleteBinding))
 	mux.HandleFunc("PUT /api/v1/settings/security", server.authorized(server.updateSecurity))
+	mux.HandleFunc("GET /api/v1/commands", server.authorized(server.commandList))
+	mux.HandleFunc("POST /api/v1/commands", server.authorized(server.commandCreate))
+	mux.HandleFunc("PUT /api/v1/commands/{id}", server.authorized(server.commandUpdate))
+	mux.HandleFunc("DELETE /api/v1/commands/{id}", server.authorized(server.commandDelete))
+	mux.HandleFunc("POST /api/v1/commands/{id}/lock", server.authorized(server.commandLock))
+	mux.HandleFunc("POST /api/v1/commands/{id}/unlock", server.authorized(server.commandUnlock))
+	mux.HandleFunc("POST /api/v1/commands/{id}/restore", server.authorized(server.commandRestore))
 	mux.HandleFunc("GET /api/v1/mirror", server.authorized(server.mirrorStatus))
 	mux.HandleFunc("PUT /api/v1/mirror", server.authorized(server.mirrorConfigure))
 	mux.HandleFunc("GET /api/v1/events", server.authorized(server.eventStream))
@@ -80,6 +92,107 @@ func New(token string, runtimeManager *bridgeruntime.Manager, controlService *co
 		ReadTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second,
 	}
 	return server
+}
+
+func (s *Server) commandList(response http.ResponseWriter, _ *http.Request) {
+	if s.commands == nil {
+		writeError(response, http.StatusServiceUnavailable, "commands_unavailable", "指令服务尚未初始化")
+		return
+	}
+	writeJSON(response, http.StatusOK, s.commands.List())
+}
+
+func (s *Server) commandCreate(response http.ResponseWriter, request *http.Request) {
+	if !s.requireCommands(response) {
+		return
+	}
+	var input commandregistry.Mutation
+	if !decodeBody(response, request, 64*1024, &input) {
+		return
+	}
+	result, err := s.commands.Create(input)
+	if err != nil {
+		writeCommandError(response, err)
+		return
+	}
+	writeJSON(response, http.StatusCreated, result)
+}
+
+func (s *Server) commandUpdate(response http.ResponseWriter, request *http.Request) {
+	if !s.requireCommands(response) {
+		return
+	}
+	var input commandregistry.Mutation
+	if !decodeBody(response, request, 64*1024, &input) {
+		return
+	}
+	result, err := s.commands.Update(request.PathValue("id"), input)
+	if err != nil {
+		writeCommandError(response, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, result)
+}
+
+func (s *Server) commandDelete(response http.ResponseWriter, request *http.Request) {
+	if !s.requireCommands(response) {
+		return
+	}
+	if err := s.commands.Delete(request.PathValue("id")); err != nil {
+		writeCommandError(response, err)
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) commandLock(response http.ResponseWriter, request *http.Request) {
+	s.commandSetLocked(response, request, true)
+}
+
+func (s *Server) commandUnlock(response http.ResponseWriter, request *http.Request) {
+	s.commandSetLocked(response, request, false)
+}
+
+func (s *Server) commandSetLocked(response http.ResponseWriter, request *http.Request, locked bool) {
+	if !s.requireCommands(response) {
+		return
+	}
+	result, err := s.commands.SetLocked(request.PathValue("id"), locked)
+	if err != nil {
+		writeCommandError(response, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, result)
+}
+
+func (s *Server) commandRestore(response http.ResponseWriter, request *http.Request) {
+	if !s.requireCommands(response) {
+		return
+	}
+	result, err := s.commands.Restore(request.PathValue("id"))
+	if err != nil {
+		writeCommandError(response, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, result)
+}
+
+func (s *Server) requireCommands(response http.ResponseWriter) bool {
+	if s.commands != nil {
+		return true
+	}
+	writeError(response, http.StatusServiceUnavailable, "commands_unavailable", "指令服务尚未初始化")
+	return false
+}
+
+func writeCommandError(response http.ResponseWriter, err error) {
+	status, code := http.StatusBadRequest, "command_invalid"
+	if errors.Is(err, commandregistry.ErrNotFound) {
+		status, code = http.StatusNotFound, "command_not_found"
+	} else if errors.Is(err, commandregistry.ErrLocked) {
+		status, code = http.StatusConflict, "command_locked"
+	}
+	writeError(response, status, code, err.Error())
 }
 
 func (s *Server) mirrorStatus(response http.ResponseWriter, _ *http.Request) {

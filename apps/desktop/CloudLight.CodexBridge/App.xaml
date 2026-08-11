@@ -191,6 +191,7 @@
             <DataTemplate DataType="{x:Type viewModels:OverviewViewModel}"><views:OverviewView /></DataTemplate>
             <DataTemplate DataType="{x:Type viewModels:SessionsViewModel}"><views:SessionsView /></DataTemplate>
             <DataTemplate DataType="{x:Type viewModels:ChannelsViewModel}"><views:ChannelsView /></DataTemplate>
+            <DataTemplate DataType="{x:Type viewModels:CommandsViewModel}"><views:CommandsView /></DataTemplate>
             <DataTemplate DataType="{x:Type viewModels:MirrorViewModel}"><views:MirrorView /></DataTemplate>
             <DataTemplate DataType="{x:Type viewModels:BackupViewModel}"><views:BackupView /></DataTemplate>
             <DataTemplate DataType="{x:Type viewModels:SettingsViewModel}"><views:SettingsView /></DataTemplate>
