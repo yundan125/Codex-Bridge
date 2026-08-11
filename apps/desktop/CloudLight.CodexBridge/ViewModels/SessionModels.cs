@@ -15,6 +15,7 @@ public sealed class TimelineEntry : ObservableObject
     public string ItemId { get; init; } = "";
     public string Kind { get; init; } = "status";
     public string Title { get; init; } = "";
+    public string Timestamp { get; init; } = "";
     public bool IsExpandable { get; init; }
     public bool IsTemporary { get; init; }
     public bool IsFailure

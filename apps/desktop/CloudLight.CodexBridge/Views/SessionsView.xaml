@@ -74,7 +74,7 @@
                     </StackPanel>
                 </Grid>
 
-                <Grid Visibility="{Binding DetailsVisibility}" Background="White">
+                <Grid Visibility="{Binding DetailsVisibility}" Background="{DynamicResource CardBrush}">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
@@ -88,7 +88,7 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <StackPanel>
-                                <TextBlock Text="{Binding SelectedDetail.Title}" FontSize="21" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                <StackPanel Orientation="Horizontal"><TextBlock Text="{Binding SelectedDetail.NumberPrefix}" FontSize="23" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" Margin="0,0,10,0"/><TextBlock Text="{Binding SelectedDetail.Title}" FontSize="21" FontWeight="SemiBold" TextWrapping="Wrap" /></StackPanel>
                                 <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
                                     <TextBlock Text="{Binding RuntimeStateText}" Foreground="{StaticResource AccentBrush}" FontWeight="SemiBold" />
                                     <TextBlock Text="{Binding RuntimeSourceText}" Foreground="{StaticResource MutedBrush}" Margin="10,0,0,0" />
@@ -96,18 +96,17 @@
                                 </StackPanel>
                             </StackPanel>
                             <StackPanel Grid.Column="1" Orientation="Horizontal">
-                                <Button Content="复制前缀" Command="{Binding CopyThreadPrefixCommand}" />
-                                <Button Content="复制 Thread ID" Command="{Binding CopyThreadIdCommand}" />
-                                <Button Content="重新验证持久化" Command="{Binding VerifyPersistenceCommand}" IsEnabled="{Binding CanVerifyPersistence}" />
-                                <Button Content="打开项目目录" Command="{Binding OpenDirectoryCommand}" />
-                                <Button Content="停止" Command="{Binding StopCommand}" IsEnabled="{Binding CanStop}" Foreground="#B42318" />
+                                <Button Content="打开" Command="{Binding OpenDirectoryCommand}" Margin="0,0,7,0"/>
+                                <Button Content="复制 #N" Command="{Binding CopyThreadPrefixCommand}" Margin="0,0,7,0"/>
+                                <Button Content="停止" Command="{Binding StopCommand}" IsEnabled="{Binding CanStop}" Foreground="{DynamicResource ErrorBrush}" Margin="0,0,7,0"/>
+                                <Menu Background="Transparent" VerticalAlignment="Center"><MenuItem Header="•••"><MenuItem Header="复制 Thread ID" Command="{Binding CopyThreadIdCommand}"/><MenuItem Header="重新验证持久化" Command="{Binding VerifyPersistenceCommand}"/></MenuItem></Menu>
                             </StackPanel>
                         </Grid>
                     </Border>
 
                     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
                         <StackPanel Margin="20">
-                            <Border Background="#F6F8FA" CornerRadius="6" Padding="12" Margin="0,0,0,14">
+                            <Border Background="{DynamicResource CodeBrush}" CornerRadius="6" Padding="12" Margin="0,0,0,14">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="100" />
@@ -121,9 +120,9 @@
                                         <RowDefinition Height="Auto" />
                                     </Grid.RowDefinitions>
                                     <TextBlock Text="Thread ID" Foreground="{StaticResource MutedBrush}" Margin="0,2" />
-                                    <TextBlock Grid.Column="1" Text="{Binding SelectedDetail.ThreadId}" FontFamily="Consolas" TextWrapping="Wrap" Margin="0,2" />
+                                    <TextBox Grid.Column="1" Text="{Binding SelectedDetail.ThreadId, Mode=OneWay}" Style="{StaticResource ReadOnlyTextStyle}" FontFamily="Consolas" Margin="0,2" />
                                     <TextBlock Grid.Row="1" Text="项目目录" Foreground="{StaticResource MutedBrush}" Margin="0,2" />
-                                    <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding SelectedDetail.Cwd}" TextWrapping="Wrap" Margin="0,2" />
+                                    <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding SelectedDetail.Cwd, Mode=OneWay}" Style="{StaticResource ReadOnlyTextStyle}" Margin="0,2" />
                                     <TextBlock Grid.Row="2" Text="模型" Foreground="{StaticResource MutedBrush}" Margin="0,2" />
                                     <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding SelectedDetail.Model}" Margin="0,2" />
                                     <TextBlock Grid.Row="3" Text="创建时间" Foreground="{StaticResource MutedBrush}" Margin="0,2" />
@@ -133,17 +132,17 @@
                                 </Grid>
                             </Border>
 
-                            <Border Visibility="{Binding PersistenceVerificationVisibility}" Background="#F6F8FA" BorderBrush="#DDE3EA" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,14">
+                            <Border Visibility="{Binding PersistenceVerificationVisibility}" Background="{DynamicResource CodeBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,14">
                                 <StackPanel>
                                     <TextBlock Text="持久化验证" FontWeight="SemiBold" />
-                                    <TextBlock Text="{Binding PersistenceVerificationText}" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0" />
+                                    <TextBox Text="{Binding PersistenceVerificationText, Mode=OneWay}" Style="{StaticResource ReadOnlyTextStyle}" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,6,0,0" />
                                 </StackPanel>
                             </Border>
 
                             <ItemsControl ItemsSource="{Binding PendingInteractions}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <Border BorderBrush="#E5A000" BorderThickness="1" Background="#FFF9E8" CornerRadius="7" Padding="14" Margin="0,0,0,12">
+                                        <Border BorderBrush="{DynamicResource WarningBrush}" BorderThickness="1" Background="{DynamicResource WarningSurfaceBrush}" CornerRadius="7" Padding="14" Margin="0,0,0,12">
                                             <StackPanel>
                                                 <Grid>
                                                     <Grid.ColumnDefinitions>
@@ -153,14 +152,14 @@
                                                     <TextBlock Text="{Binding Title}" FontSize="16" FontWeight="SemiBold" />
                                                     <TextBlock Grid.Column="1" Text="等待本机处理" Foreground="#8A5A00" />
                                                 </Grid>
-                                                <TextBlock Text="{Binding Description}" TextWrapping="Wrap" Margin="0,7,0,0" />
+                                                <TextBox Text="{Binding Description, Mode=OneWay}" Style="{StaticResource ReadOnlyTextStyle}" Margin="0,7,0,0" />
                                                 <Border Visibility="{Binding CommandVisibility}" Background="#202A34" CornerRadius="4" Padding="10" Margin="0,10,0,0">
                                                     <StackPanel>
-                                                        <TextBlock Text="{Binding Command}" Foreground="#F2F5F7" FontFamily="Consolas" TextWrapping="Wrap" />
-                                                        <TextBlock Text="{Binding Cwd}" Foreground="#AEB9C4" FontSize="11" Margin="0,5,0,0" />
+                                                        <TextBox Text="{Binding Command, Mode=OneWay}" Style="{StaticResource ReadOnlyTextStyle}" Foreground="#F2F5F7" FontFamily="Consolas" />
+                                                        <TextBox Text="{Binding Cwd, Mode=OneWay}" Style="{StaticResource ReadOnlyTextStyle}" Foreground="#AEB9C4" FontSize="11" Margin="0,5,0,0" />
                                                     </StackPanel>
                                                 </Border>
-                                                <TextBlock Visibility="{Binding FileChangesVisibility}" Text="{Binding FileChangesText}" FontFamily="Consolas" TextWrapping="Wrap" Margin="0,10,0,0" />
+                                                <TextBox Visibility="{Binding FileChangesVisibility}" Text="{Binding FileChangesText, Mode=OneWay}" Style="{StaticResource CodeTextStyle}" Margin="0,10,0,0" />
 
                                                 <StackPanel Visibility="{Binding UserInputVisibility}" Margin="0,10,0,0">
                                                     <ItemsControl ItemsSource="{Binding Questions}">
@@ -168,7 +167,7 @@
                                                             <DataTemplate>
                                                                 <StackPanel Margin="0,0,0,12">
                                                                     <TextBlock Text="{Binding Header}" FontWeight="SemiBold" />
-                                                                    <TextBlock Text="{Binding Text}" TextWrapping="Wrap" Margin="0,3,0,6" />
+                                                                    <TextBox Text="{Binding Text, Mode=OneWay}" Style="{StaticResource ReadOnlyTextStyle}" Margin="0,3,0,6" />
                                                                     <ItemsControl ItemsSource="{Binding Options}" Visibility="{Binding SingleChoiceVisibility}">
                                                                         <ItemsControl.ItemTemplate>
                                                                             <DataTemplate>
@@ -216,13 +215,12 @@
                                                         <ColumnDefinition Width="*" />
                                                         <ColumnDefinition Width="Auto" />
                                                     </Grid.ColumnDefinitions>
-                                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
-                                                    <TextBlock Grid.Column="1" Text="{Binding Status}" Foreground="{Binding StatusBrush}" FontSize="11" />
+                                                    <StackPanel Orientation="Horizontal"><TextBlock Text="{Binding Title}" FontWeight="SemiBold"/><TextBlock Text="{Binding Timestamp}" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" Margin="9,1,0,0"/></StackPanel>
+                                                    <Border Grid.Column="1" Style="{StaticResource BadgeStyle}"><TextBlock Text="{Binding Status}" Foreground="{Binding StatusBrush}" FontSize="11" /></Border>
                                                 </Grid>
-                                                <TextBlock Text="{Binding Text}" TextWrapping="Wrap" Margin="0,6,0,0" Visibility="{Binding MessageVisibility}" />
+                                                <TextBox Text="{Binding Text, Mode=OneWay}" Style="{StaticResource ReadOnlyTextStyle}" Margin="0,9,0,0" Visibility="{Binding MessageVisibility}" FontSize="14" />
                                                 <Expander Header="查看工具详情" Visibility="{Binding ExpandableVisibility}" Margin="0,6,0,0">
-                                                    <TextBox Text="{Binding Text}" IsReadOnly="True" BorderThickness="0" Background="#F6F8FA"
-                                                             FontFamily="Consolas" TextWrapping="Wrap" AcceptsReturn="True" MaxHeight="300" VerticalScrollBarVisibility="Auto" />
+                                                    <TextBox Text="{Binding Text, Mode=OneWay}" Style="{StaticResource CodeTextStyle}" MaxHeight="300" VerticalScrollBarVisibility="Auto" />
                                                 </Expander>
                                             </StackPanel>
                                         </Border>
@@ -234,7 +232,7 @@
 
                     <Border Grid.Row="2" BorderBrush="#DDE3EA" BorderThickness="0,1,0,0" Padding="16">
                         <StackPanel>
-                            <TextBlock Text="{Binding ActionError}" Foreground="#B42318" TextWrapping="Wrap" Visibility="{Binding ActionErrorVisibility}" Margin="0,0,0,8" />
+                            <TextBox Text="{Binding ActionError, Mode=OneWay}" Style="{StaticResource ReadOnlyTextStyle}" Foreground="{DynamicResource ErrorBrush}" Visibility="{Binding ActionErrorVisibility}" Margin="0,0,0,8" />
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />

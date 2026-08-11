@@ -302,6 +302,20 @@ public sealed class UserSettings
 	public string QqCommandPrefix { get; set; } = "/codex";
 	public string QqProxyMode { get; set; } = "environment";
 	public string QqProxyUrl { get; set; } = "";
+	public bool StartWithWindows { get; set; }
+	public bool SilentStartup { get; set; } = true;
+	public bool MirrorAutoStart { get; set; }
+	public bool CloseToTray { get; set; } = true;
+	public bool RestoreLastPage { get; set; } = true;
+	public bool AutoRefreshThreads { get; set; } = true;
+	public int ThreadRefreshIntervalSeconds { get; set; } = 30;
+	public string Theme { get; set; } = "system";
+	public double WindowWidth { get; set; } = 1280;
+	public double WindowHeight { get; set; } = 800;
+	public double WindowLeft { get; set; } = double.NaN;
+	public double WindowTop { get; set; } = double.NaN;
+	public bool WindowMaximized { get; set; }
+	public string LastPage { get; set; } = "overview";
 }
 
 public sealed class ChannelListResponse

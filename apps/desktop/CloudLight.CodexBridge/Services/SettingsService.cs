@@ -97,6 +97,13 @@ public sealed class SettingsService
 			if (settings.QqProxyMode == "custom-http") settings.QqProxyMode = "environment";
 			settings.QqProxyUrl = "";
 		}
+		settings.ThreadRefreshIntervalSeconds = Math.Clamp(settings.ThreadRefreshIntervalSeconds, 10, 300);
+		settings.Theme = settings.Theme is "light" or "dark" ? settings.Theme : "system";
+		settings.LastPage = settings.LastPage is "overview" or "sessions" or "channels" or "mirror" or "backup" or "settings" or "logs"
+			? settings.LastPage
+			: "overview";
+		settings.WindowWidth = Math.Clamp(double.IsFinite(settings.WindowWidth) ? settings.WindowWidth : 1280, 1040, 3840);
+		settings.WindowHeight = Math.Clamp(double.IsFinite(settings.WindowHeight) ? settings.WindowHeight : 800, 680, 2160);
 		return settings;
 	}
 

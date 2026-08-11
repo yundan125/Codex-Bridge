@@ -584,6 +584,7 @@ public sealed class SessionsViewModel : ObservableObject
                 Timeline.Add(new TimelineEntry
                 {
                     Key = $"{turn.TurnId}:{item.ItemId}", TurnId = turn.TurnId, ItemId = item.ItemId,
+                    Timestamp = string.IsNullOrWhiteSpace(turn.UpdatedAt) ? turn.CreatedAt : turn.UpdatedAt,
                     Kind = kind, Title = title, Text = string.Join(Environment.NewLine, new[] { item.Text, item.Label, item.Output }.Where(value => !string.IsNullOrWhiteSpace(value))),
                     // Item state and turn state are different concepts.  Do not
                     // borrow turn.Status here: it made unknown cards look like a
@@ -639,7 +640,7 @@ public sealed class SessionsViewModel : ObservableObject
     {
         var entry = new TimelineEntry
         {
-            Key = EventKey(bridgeEvent), TurnId = bridgeEvent.TurnId, ItemId = bridgeEvent.ItemId,
+            Key = EventKey(bridgeEvent), TurnId = bridgeEvent.TurnId, ItemId = bridgeEvent.ItemId, Timestamp = bridgeEvent.Timestamp,
             Kind = kind, Title = title, IsExpandable = expandable, IsTemporary = true
         };
         Timeline.Add(entry);

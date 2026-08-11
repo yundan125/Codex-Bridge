@@ -25,11 +25,10 @@
                      ScrollViewer.HorizontalScrollBarVisibility="Auto">
                 <ListBox.ItemTemplate>
                     <DataTemplate>
-                        <TextBlock Text="{Binding Display}" TextWrapping="NoWrap" Padding="8,4" />
+                        <TextBox Text="{Binding Display, Mode=OneWay}" Style="{StaticResource ReadOnlyTextStyle}" FontFamily="Cascadia Mono, Consolas" TextWrapping="NoWrap" Padding="8,4" />
                     </DataTemplate>
                 </ListBox.ItemTemplate>
             </ListBox>
         </Border>
     </Grid>
 </UserControl>
-

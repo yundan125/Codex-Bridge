@@ -12,6 +12,7 @@ public sealed class SettingsViewModel : ObservableObject
     private readonly BridgeApiClient _api;
     private readonly UserSettings _settings;
     private readonly LogService _logs;
+    private readonly StartupService _startup;
     private string _codexCustomPath;
     private string _sandboxMode;
     private string _codexDetection = "等待后端检测";
@@ -28,15 +29,27 @@ public sealed class SettingsViewModel : ObservableObject
 	private bool _requireThreadNumber = true;
 	private string _mirrorStatusText = "等待读取";
 	private string _qqCapabilityNotice = "QQ 官方机器人主动消息受平台权限、回复窗口和额度限制。";
+    private bool _startWithWindows, _silentStartup, _closeToTray, _restoreLastPage, _autoRefreshThreads, _mirrorAutoStart;
+    private int _threadRefreshIntervalSeconds;
+    private string _theme;
 
-    public SettingsViewModel(SettingsService service, BridgeApiClient api, UserSettings settings, LogService logs)
+    public SettingsViewModel(SettingsService service, BridgeApiClient api, UserSettings settings, LogService logs, StartupService startup)
     {
         _service = service;
         _api = api;
         _settings = settings;
         _logs = logs;
+        _startup = startup;
         _codexCustomPath = settings.CodexCustomPath;
         _sandboxMode = settings.SandboxMode is "read-only" ? "read-only" : "workspace-write";
+        _startWithWindows = startup.IsEnabled;
+        _silentStartup = settings.SilentStartup;
+        _closeToTray = settings.CloseToTray;
+        _restoreLastPage = settings.RestoreLastPage;
+        _autoRefreshThreads = settings.AutoRefreshThreads;
+        _threadRefreshIntervalSeconds = settings.ThreadRefreshIntervalSeconds;
+        _theme = settings.Theme;
+        _mirrorAutoStart = settings.MirrorAutoStart;
         SaveCommand = new AsyncRelayCommand(SaveAsync);
         OpenDataDirectoryCommand = new RelayCommand(_ => OpenDirectory(DataDirectory));
         OpenLogDirectoryCommand = new RelayCommand(_ => OpenDirectory(LogDirectory));
@@ -48,6 +61,34 @@ public sealed class SettingsViewModel : ObservableObject
     public IReadOnlyList<string> SandboxModes { get; } = ["workspace-write", "read-only"];
     public string DataDirectory => _service.DataDirectory;
     public string LogDirectory => _service.LogDirectory;
+    public IReadOnlyList<string> Themes { get; } = ["system", "light", "dark"];
+    public IReadOnlyList<int> ThreadRefreshIntervals { get; } = [10, 15, 30, 60, 120, 300];
+    public bool StartWithWindows { get => _startWithWindows; set => SetProperty(ref _startWithWindows, value); }
+    public bool SilentStartup { get => _silentStartup; set => SetProperty(ref _silentStartup, value); }
+    public bool CloseToTray { get => _closeToTray; set => SetProperty(ref _closeToTray, value); }
+    public bool RestoreLastPage { get => _restoreLastPage; set => SetProperty(ref _restoreLastPage, value); }
+    public bool AutoRefreshThreads { get => _autoRefreshThreads; set => SetProperty(ref _autoRefreshThreads, value); }
+    public int ThreadRefreshIntervalSeconds { get => _threadRefreshIntervalSeconds; set => SetProperty(ref _threadRefreshIntervalSeconds, value); }
+    public string Theme { get => _theme; set { if (SetProperty(ref _theme, value)) App.ApplyTheme(value); } }
+    public bool MirrorAutoStart { get => _mirrorAutoStart; set => SetProperty(ref _mirrorAutoStart, value); }
+    public bool TelegramAutoStart { get => _settings.TelegramAutoStart; set { _settings.TelegramAutoStart = value; OnPropertyChanged(); } }
+    public bool QqAutoStart { get => _settings.QqAutoStart; set { _settings.QqAutoStart = value; OnPropertyChanged(); } }
+
+    public void ReloadUserPreferences(UserSettings settings)
+    {
+        CodexCustomPath = settings.CodexCustomPath;
+        SandboxMode = settings.SandboxMode;
+        StartWithWindows = settings.StartWithWindows;
+        SilentStartup = settings.SilentStartup;
+        CloseToTray = settings.CloseToTray;
+        RestoreLastPage = settings.RestoreLastPage;
+        AutoRefreshThreads = settings.AutoRefreshThreads;
+        ThreadRefreshIntervalSeconds = settings.ThreadRefreshIntervalSeconds;
+        Theme = settings.Theme;
+        MirrorAutoStart = settings.MirrorAutoStart;
+        OnPropertyChanged(nameof(TelegramAutoStart));
+        OnPropertyChanged(nameof(QqAutoStart));
+    }
 
     public string CodexCustomPath
     {
@@ -138,6 +179,16 @@ public sealed class SettingsViewModel : ObservableObject
     {
         _settings.CodexCustomPath = CodexCustomPath.Trim();
         _settings.SandboxMode = SandboxMode is "read-only" ? "read-only" : "workspace-write";
+        _settings.StartWithWindows = StartWithWindows;
+        _settings.SilentStartup = SilentStartup;
+        _settings.CloseToTray = CloseToTray;
+        _settings.RestoreLastPage = RestoreLastPage;
+        _settings.AutoRefreshThreads = AutoRefreshThreads;
+        _settings.ThreadRefreshIntervalSeconds = ThreadRefreshIntervalSeconds;
+        _settings.Theme = Theme;
+        _settings.MirrorAutoStart = MirrorAutoStart;
+        try { _startup.Configure(StartWithWindows, SilentStartup); }
+        catch (Exception exception) { SaveResult = $"启动项更新失败：{exception.Message}"; return; }
         await _service.SaveAsync(_settings);
         try
         {

@@ -1,6 +1,8 @@
 param(
-    [string]$Version = "0.6.2",
-    [string]$OutputDirectory = ""
+    [string]$Version = "0.7.0",
+    [string]$OutputDirectory = "",
+    [switch]$SelfContained,
+    [switch]$ExcludeSymbols
 )
 
 $ErrorActionPreference = "Stop"
@@ -38,7 +40,22 @@ $env:CGO_ENABLED = "0"
 & $goExecutable -C $daemonRoot build -trimpath -ldflags "-s -w -X main.version=$Version" -o $daemonExecutable .\cmd\bridge-daemon
 if ($LASTEXITCODE -ne 0) { throw "Go daemon build failed." }
 
-dotnet publish $desktopProject -c Release -r win-x64 --self-contained false -p:Version=$Version -o $publishDirectory --nologo
+$selfContainedValue = $SelfContained.IsPresent.ToString().ToLowerInvariant()
+$publishArguments = @(
+    "publish",
+    $desktopProject,
+    "-c", "Release",
+    "-r", "win-x64",
+    "--self-contained", $selfContainedValue,
+    "-p:Version=$Version",
+    "-o", $publishDirectory,
+    "--nologo"
+)
+if ($ExcludeSymbols) {
+    $publishArguments += @("-p:DebugSymbols=false", "-p:DebugType=None")
+}
+
+dotnet @publishArguments
 if ($LASTEXITCODE -ne 0) { throw "WPF Release publish failed." }
 Copy-Item -LiteralPath $daemonExecutable -Destination (Join-Path $publishDirectory "bridge-daemon.exe") -Force
 New-Item -ItemType Directory -Path (Join-Path $publishDirectory "licenses") -Force | Out-Null

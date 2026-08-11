@@ -26,7 +26,7 @@ import (
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/threadregistry"
 )
 
-var version = "0.6.2"
+var version = "0.7.0"
 
 func main() {
 	options := config.Options{Version: version}

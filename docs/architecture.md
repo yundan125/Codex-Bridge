@@ -1,6 +1,6 @@
 # 架构
 
-CloudLight Codex Bridge 0.6.2 由 WPF、仅监听回环地址的 Go daemon、Codex App Server、Thread Number Registry、Mirror Service、Telegram Adapter 与 QQ Official Bot Adapter 组成。WPF 只消费本机 DTO/SSE；平台原始类型不会进入 Runtime、Binding Repository 或 Codex 控制层。
+CloudLight Codex Bridge 0.7.0 由 WPF、仅监听回环地址的 Go daemon、Codex App Server、Thread Number Registry、Mirror Service、Telegram Adapter 与 QQ Official Bot Adapter 组成。WPF 只消费本机 DTO/SSE；平台原始类型不会进入 Runtime、Binding Repository 或 Codex 控制层。
 
 ```mermaid
 flowchart LR

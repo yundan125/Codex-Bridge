@@ -522,7 +522,7 @@ public sealed class QqChannelViewModel : ObservableObject
     private static (string Message, string Type) DescribeLoadError(Exception exception)
     {
         if (exception is QqSecretException) return ("无法读取已保存的 AppSecret；文件可能损坏或属于其他 Windows 用户。", "DPAPI");
-		if (exception is BridgeApiException api && api.StatusCode == HttpStatusCode.NotFound) return ("QQ Official Bot API 不可用，请确认后端版本为 0.6.2。", "HTTP");
+		if (exception is BridgeApiException api && api.StatusCode == HttpStatusCode.NotFound) return ("QQ Official Bot API 不可用，请确认后端版本为 0.7.0。", "HTTP");
         return ($"加载 QQ 官方机器人失败：{LogService.Redact(exception.Message)}", exception.GetType().Name);
     }
 
