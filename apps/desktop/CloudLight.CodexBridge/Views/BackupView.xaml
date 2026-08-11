@@ -9,23 +9,23 @@
                     <Button Content="打开数据位置" Command="{Binding OpenCodexHomeCommand}" HorizontalAlignment="Left" Margin="0,14,0,0"/>
                 </StackPanel></Border>
                 <Border Grid.Column="2" Style="{StaticResource CardStyle}"><StackPanel>
-                    <TextBlock Text="备份格式" Style="{StaticResource EyebrowTextStyle}"/><TextBlock Text=".clcbak" FontSize="24" FontWeight="SemiBold" Margin="0,7,0,0"/>
-                    <TextBlock Text="ZIP 容器 · manifest.json · 每文件 SHA-256" Style="{StaticResource SecondaryTextStyle}" TextWrapping="Wrap" Margin="0,8,0,0"/>
-                    <TextBlock Text="完整备份可能包含账号凭据。" Foreground="{StaticResource WarningBrush}" Margin="0,12,0,0"/>
+                    <TextBlock Text="备份保护" Style="{StaticResource EyebrowTextStyle}"/><TextBlock Text="完整性校验" FontSize="24" FontWeight="SemiBold" Margin="0,7,0,0"/>
+                    <TextBlock Text="恢复前会检查备份是否完整，避免使用损坏的文件。" Style="{StaticResource SecondaryTextStyle}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                    <TextBlock Text="完整备份可能包含账号凭据。" Foreground="{DynamicResource WarningBrush}" Margin="0,12,0,0"/>
                 </StackPanel></Border>
             </Grid>
             <Grid Margin="0,0,0,16"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="16"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                 <Border Style="{StaticResource CardStyle}"><StackPanel>
-                    <TextBlock Text="完整备份" Style="{StaticResource SectionTitleStyle}"/><TextBlock Text="按真实目录完整复制，不使用文件类型白名单。" Style="{StaticResource SecondaryTextStyle}" Margin="0,5,0,14"/>
-                    <CheckBox Content="Codex 数据（完整 CODEX_HOME）" IsChecked="{Binding IncludeCodex}"/><CheckBox Content="CloudLight Codex Bridge 数据" IsChecked="{Binding IncludeBridge}" Margin="0,9,0,0"/>
+                    <TextBlock Text="完整备份" Style="{StaticResource SectionTitleStyle}"/><TextBlock Text="选择需要保存的数据。" Style="{StaticResource SecondaryTextStyle}" Margin="0,5,0,14"/>
+                    <CheckBox Content="Codex 数据目录" IsChecked="{Binding IncludeCodex}"/><CheckBox Content="CloudLight Codex Bridge 应用数据" IsChecked="{Binding IncludeBridge}" Margin="0,9,0,0"/>
                     <StackPanel Orientation="Horizontal" Margin="0,18,0,0"><Button Content="创建备份" Command="{Binding CreateBackupCommand}" Style="{StaticResource PrimaryButtonStyle}"/><Button Content="取消备份" Command="{Binding CancelBackupCommand}" Margin="8,0,0,0"/></StackPanel>
                 </StackPanel></Border>
                 <Border Grid.Column="2" Style="{StaticResource CardStyle}"><StackPanel>
-                    <TextBlock Text="恢复备份" Style="{StaticResource SectionTitleStyle}"/><TextBlock Text="选择后先完整验证 manifest、路径、大小和 SHA-256。" Style="{StaticResource SecondaryTextStyle}" TextWrapping="Wrap" Margin="0,5,0,14"/>
+                    <TextBlock Text="恢复备份" Style="{StaticResource SectionTitleStyle}"/><TextBlock Text="选择备份后会先检查完整性，再允许恢复。" Style="{StaticResource SecondaryTextStyle}" TextWrapping="Wrap" Margin="0,5,0,14"/>
                     <Button Content="选择 .clcbak 文件" Command="{Binding SelectBackupCommand}" HorizontalAlignment="Left"/>
                     <TextBox Text="{Binding SelectedBackup, Mode=OneWay}" Style="{StaticResource ReadOnlyTextStyle}" Margin="0,9,0,0"/>
                     <TextBox Text="{Binding BackupDetails, Mode=OneWay}" Style="{StaticResource ReadOnlyTextStyle}" Visibility="{Binding BackupDetailsVisibility}" Margin="0,12,0,0"/>
-                    <StackPanel Visibility="{Binding BackupDetailsVisibility}" Margin="0,14,0,0"><CheckBox Content="恢复 Codex 数据" IsChecked="{Binding RestoreCodex}"/><CheckBox Content="恢复 Bridge 数据" IsChecked="{Binding RestoreBridge}" Margin="0,7,0,0"/><RadioButton Content="完整替换（推荐）" IsChecked="{Binding ReplaceMode}" GroupName="RestoreMode" Margin="0,13,0,0"/><RadioButton Content="合并（仅复制当前不存在的文件）" GroupName="RestoreMode" Margin="0,7,0,0"/><Button Content="开始恢复" Command="{Binding RestoreCommand}" Style="{StaticResource DangerButtonStyle}" HorizontalAlignment="Left" Margin="0,16,0,0"/></StackPanel>
+                    <StackPanel Visibility="{Binding BackupDetailsVisibility}" Margin="0,14,0,0"><CheckBox Content="恢复 Codex 数据" IsChecked="{Binding RestoreCodex}"/><CheckBox Content="恢复应用数据" IsChecked="{Binding RestoreBridge}" Margin="0,7,0,0"/><RadioButton Content="完整替换（推荐）" IsChecked="{Binding ReplaceMode}" GroupName="RestoreMode" Margin="0,13,0,0"/><RadioButton Content="合并（仅复制当前不存在的文件）" GroupName="RestoreMode" Margin="0,7,0,0"/><Button Content="开始恢复" Command="{Binding RestoreCommand}" Style="{StaticResource DangerButtonStyle}" HorizontalAlignment="Left" Margin="0,16,0,0"/></StackPanel>
                 </StackPanel></Border>
             </Grid>
             <Border Style="{StaticResource CardStyle}" Visibility="{Binding BusyVisibility}" Margin="0,0,0,16"><StackPanel><TextBlock Text="{Binding ProgressStage}"/><ProgressBar Value="{Binding ProgressPercent, Mode=OneWay}" Height="5" Margin="0,10,0,0"/></StackPanel></Border>

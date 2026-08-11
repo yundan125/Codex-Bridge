@@ -13,7 +13,7 @@
             </Grid.ColumnDefinitions>
             <StackPanel>
                 <TextBlock Text="{StaticResource LogsTitle}" FontSize="24" FontWeight="SemiBold" />
-                <TextBlock Text="{StaticResource LogsIntro}" Foreground="{StaticResource MutedBrush}" Margin="0,7,0,0" />
+                <TextBlock Text="{StaticResource LogsIntro}" Foreground="{DynamicResource MutedBrush}" Margin="0,7,0,0" />
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Bottom">
                 <Button Content="{StaticResource ClearDisplay}" Command="{Binding ClearCommand}" />

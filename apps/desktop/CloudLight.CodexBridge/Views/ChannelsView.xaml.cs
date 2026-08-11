@@ -17,7 +17,7 @@ public partial class ChannelsView : UserControl
     {
         if (DataContext is not ChannelsViewModel viewModel) return;
         if (MessageBox.Show(
-                "确定删除当前 Windows 用户保存的 Telegram Token，并从后端清除吗？",
+                "确定删除已保存的 Telegram 机器人密钥吗？",
                 "删除 Telegram Token", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         TokenBox.Clear();
         await viewModel.DeleteTokenAsync();
@@ -27,8 +27,8 @@ public partial class ChannelsView : UserControl
     {
         if (DataContext is not ChannelsViewModel viewModel || sender is not Button { Tag: string bindingId }) return;
         if (MessageBox.Show(
-                "确定删除这个 Telegram 绑定吗？此操作不会删除对应的 Codex Thread。",
-                "删除绑定", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+                "确定删除这个 Telegram 关联会话吗？对应的 Codex 会话不会被删除。",
+                "删除关联会话", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         await viewModel.DeleteBindingAsync(bindingId);
     }
 
@@ -42,8 +42,8 @@ public partial class ChannelsView : UserControl
 	{
 		if (DataContext is not ChannelsViewModel viewModel) return;
 		if (MessageBox.Show(
-				"确定停止 QQ 官方机器人、删除当前 Windows 用户保存的 AppSecret，并从后端内存清除吗？Telegram Token 不会被修改。",
-				"删除 QQ Bot AppSecret", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+				"确定停止 QQ 机器人并删除已保存的应用密钥吗？Telegram 设置不会受到影响。",
+				"删除 QQ 应用密钥", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
 		QqSecretBox.Clear();
 		await viewModel.Qq.DeleteSecretAsync();
     }
@@ -52,8 +52,8 @@ public partial class ChannelsView : UserControl
     {
         if (DataContext is not ChannelsViewModel viewModel || sender is not Button { Tag: string bindingId }) return;
         if (MessageBox.Show(
-                "确定删除这个 QQ 绑定吗？此操作不会删除对应的 Codex Thread。",
-                "删除 QQ 绑定", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+                "确定删除这个 QQ 关联会话吗？对应的 Codex 会话不会被删除。",
+                "删除 QQ 关联会话", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
 		await viewModel.Qq.DeleteBindingAsync(bindingId);
 	}
 

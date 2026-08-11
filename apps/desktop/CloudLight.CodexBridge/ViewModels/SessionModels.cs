@@ -26,7 +26,8 @@ public sealed class TimelineEntry : ObservableObject
             if (SetProperty(ref _isFailure, value)) OnPropertyChanged(nameof(StatusBrush));
         }
     }
-    public string StatusBrush => IsFailure ? "#B42318" : IsTemporary ? "#8A5A00" : "#667085";
+    public System.Windows.Media.Brush StatusBrush => (System.Windows.Media.Brush)Application.Current.Resources[IsFailure ? "ErrorBrush" : IsTemporary ? "WarningBrush" : "SecondaryTextBrush"];
+    public string TimestampDisplay => UiText.LocalDateTime(Timestamp);
     public Visibility MessageVisibility => IsExpandable ? Visibility.Collapsed : Visibility.Visible;
     public Visibility ExpandableVisibility => IsExpandable ? Visibility.Visible : Visibility.Collapsed;
 
@@ -39,7 +40,7 @@ public sealed class TimelineEntry : ObservableObject
     public string Status
     {
         get => _status;
-        set => SetProperty(ref _status, value);
+        set => SetProperty(ref _status, UiText.Status(value));
     }
 }
 
@@ -125,6 +126,7 @@ public sealed class PendingInteractionViewModel : ObservableObject
     public string Command => Model.Command;
     public string Cwd => Model.Cwd;
     public string ExpiresAt => Model.ExpiresAt;
+    public string WaitingText => Kind == "user-input" ? "等待你的回答" : "等待你的确认";
     public string FileChangesText => string.Join(Environment.NewLine, Model.FileChanges.Select(change => $"{change.Kind}  {change.Path}"));
     public Visibility CommandVisibility => string.IsNullOrWhiteSpace(Command) ? Visibility.Collapsed : Visibility.Visible;
     public Visibility FileChangesVisibility => Model.FileChanges.Count > 0 ? Visibility.Visible : Visibility.Collapsed;

@@ -29,7 +29,7 @@ public sealed class OverviewViewModel : ObservableObject
     public string RunningTurn => _sessions.CanStop ? "正在运行" : "当前无运行任务";
     public string TelegramState => _channels.StatusText;
     public string QqState => _channels.Qq.StatusText;
-    public string MirrorState => _settings.MirrorEnabled ? "已启用 · Final-only" : "未启用";
+    public string MirrorState => _settings.MirrorEnabled ? "已启用 · 仅同步最终回答" : "未启用";
     public string RecentActivity => _sessions.SelectedThread is null ? "等待选择 Codex 会话" : $"最近查看：{_sessions.SelectedThread.Title}";
 
     private void OnChanged(object? sender, EventArgs e) => NotifyAll();

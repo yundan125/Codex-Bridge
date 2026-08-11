@@ -9,7 +9,7 @@
         <Border Background="{DynamicResource SidebarBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0">
             <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                 <Grid Margin="20,22,16,18"><Grid.ColumnDefinitions><ColumnDefinition Width="42"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                    <Border Width="36" Height="36" CornerRadius="8" Background="White"><Image Source="Resources/AppIcon.png" Stretch="Uniform" Margin="2"/></Border>
+                    <Border Width="36" Height="36" CornerRadius="8" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"><Image Source="Resources/AppIcon.png" Stretch="Uniform" Margin="2"/></Border>
                     <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="10,0,0,0"><TextBlock Text="CloudLight" FontWeight="SemiBold" FontSize="15"/><TextBlock Text="Codex Bridge" Style="{StaticResource SecondaryTextStyle}" FontSize="11"/></StackPanel>
                 </Grid>
                 <StackPanel Grid.Row="1">
@@ -24,7 +24,7 @@
                 </StackPanel>
                 <StackPanel Grid.Row="2" Margin="0,0,0,12">
                     <RadioButton Content="设置" Style="{StaticResource NavigationButtonStyle}" GroupName="Navigation" IsChecked="{Binding IsSettingsPage, Mode=OneWay}" Command="{Binding NavigateCommand}" CommandParameter="settings"/>
-                    <TextBlock Text="v0.7.0" Style="{StaticResource SecondaryTextStyle}" Margin="20,8,0,5"/>
+                    <TextBlock Text="v0.7.1" Style="{StaticResource SecondaryTextStyle}" Margin="20,8,0,5"/>
                 </StackPanel>
             </Grid>
         </Border>
@@ -39,7 +39,7 @@
                 </Grid>
             </Border>
             <ContentControl Grid.Row="1" Content="{Binding CurrentPage}" Margin="{StaticResource PagePadding}"/>
-            <Border Grid.RowSpan="2" Background="#FFFFF0DC" BorderBrush="#FFE8B45D" BorderThickness="1" CornerRadius="8" Padding="14" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="24" MaxWidth="620" Visibility="{Binding ErrorVisibility}">
+            <Border Grid.RowSpan="2" Background="{DynamicResource WarningSurfaceBrush}" BorderBrush="{DynamicResource WarningBrush}" BorderThickness="1" CornerRadius="8" Padding="14" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="24" MaxWidth="620" Visibility="{Binding ErrorVisibility}">
                 <TextBox Text="{Binding ErrorMessage, Mode=OneWay}" Style="{StaticResource ReadOnlyTextStyle}" Foreground="{DynamicResource WarningBrush}"/>
             </Border>
         </Grid>

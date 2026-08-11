@@ -29,18 +29,18 @@
                          BorderThickness="0" Background="Transparent" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                     <ListBox.ItemTemplate>
                         <DataTemplate>
-                            <Border BorderBrush="#E1E6EB" BorderThickness="0,0,0,1" Padding="12">
+                            <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="12">
                                 <StackPanel>
                                     <TextBlock Text="{Binding NumberedTitle}" FontWeight="SemiBold" FontSize="14" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Text="{Binding Cwd}" Foreground="{StaticResource MutedBrush}" FontSize="12"
+                                    <TextBlock Text="{Binding Cwd}" Foreground="{DynamicResource MutedBrush}" FontSize="12"
                                                Margin="0,5,0,0" TextTrimming="CharacterEllipsis" />
                                     <Grid Margin="0,6,0,0">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
-                                        <TextBlock Text="{Binding UpdatedAt}" Foreground="{StaticResource MutedBrush}" FontSize="11" TextTrimming="CharacterEllipsis" />
-                                        <TextBlock Grid.Column="1" Text="{Binding Status}" Foreground="{StaticResource AccentBrush}" FontSize="11" Margin="8,0,0,0" />
+                                        <TextBlock Text="{Binding UpdatedAtDisplay}" Foreground="{DynamicResource MutedBrush}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Grid.Column="1" Text="{Binding StatusDisplay}" Foreground="{DynamicResource AccentBrush}" FontSize="11" Margin="8,0,0,0" />
                                     </Grid>
                                 </StackPanel>
                             </Border>
@@ -50,26 +50,26 @@
             </Grid>
         </Border>
 
-        <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Center" Background="#D8DEE5" />
+        <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Center" Background="{DynamicResource BorderBrush}" />
 
         <Border Grid.Column="2" Style="{StaticResource CardStyle}" Padding="0">
             <Grid>
-                <Grid Visibility="{Binding EmptyVisibility}" Background="White">
-                    <TextBlock Text="{StaticResource SelectThreadHint}" Foreground="{StaticResource MutedBrush}"
+                <Grid Visibility="{Binding EmptyVisibility}" Background="{DynamicResource CardBrush}">
+                    <TextBlock Text="{StaticResource SelectThreadHint}" Foreground="{DynamicResource MutedBrush}"
                                HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="15" />
                 </Grid>
 
-                <Grid Visibility="{Binding LoadingVisibility}" Background="White">
+                <Grid Visibility="{Binding LoadingVisibility}" Background="{DynamicResource CardBrush}">
                     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
                         <ProgressBar Width="180" Height="4" IsIndeterminate="True" />
-                        <TextBlock Text="正在读取真实 Codex Thread…" Foreground="{StaticResource MutedBrush}" Margin="0,14,0,0" />
+                        <TextBlock Text="正在读取 Codex 会话…" Foreground="{DynamicResource MutedBrush}" Margin="0,14,0,0" />
                     </StackPanel>
                 </Grid>
 
-                <Grid Visibility="{Binding ErrorVisibility}" Background="White">
+                <Grid Visibility="{Binding ErrorVisibility}" Background="{DynamicResource CardBrush}">
                     <StackPanel MaxWidth="560" HorizontalAlignment="Center" VerticalAlignment="Center">
-                        <TextBlock Text="Thread 读取失败" FontSize="18" FontWeight="SemiBold" HorizontalAlignment="Center" />
-                        <TextBlock Text="{Binding ErrorText}" Foreground="#B42318" TextWrapping="Wrap" TextAlignment="Center" Margin="0,10,0,14" />
+                        <TextBlock Text="无法读取会话" FontSize="18" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                        <TextBlock Text="{Binding ErrorText}" Foreground="{DynamicResource ErrorBrush}" TextWrapping="Wrap" TextAlignment="Center" Margin="0,10,0,14" />
                         <Button Content="重试" Command="{Binding RetryCommand}" HorizontalAlignment="Center" />
                     </StackPanel>
                 </Grid>
@@ -81,7 +81,7 @@
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <Border BorderBrush="#DDE3EA" BorderThickness="0,0,0,1" Padding="20,16">
+                    <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="20,16">
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
@@ -90,16 +90,22 @@
                             <StackPanel>
                                 <StackPanel Orientation="Horizontal"><TextBlock Text="{Binding SelectedDetail.NumberPrefix}" FontSize="23" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" Margin="0,0,10,0"/><TextBlock Text="{Binding SelectedDetail.Title}" FontSize="21" FontWeight="SemiBold" TextWrapping="Wrap" /></StackPanel>
                                 <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-                                    <TextBlock Text="{Binding RuntimeStateText}" Foreground="{StaticResource AccentBrush}" FontWeight="SemiBold" />
-                                    <TextBlock Text="{Binding RuntimeSourceText}" Foreground="{StaticResource MutedBrush}" Margin="10,0,0,0" />
-                                    <TextBlock Text="{Binding CurrentTurnId}" Foreground="{StaticResource MutedBrush}" FontFamily="Consolas" Margin="10,0,0,0" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding RuntimeStateText}" Foreground="{DynamicResource AccentBrush}" FontWeight="SemiBold" />
+                                    <TextBlock Text="{Binding RuntimeSourceText}" Foreground="{DynamicResource MutedBrush}" Margin="10,0,0,0" />
                                 </StackPanel>
                             </StackPanel>
                             <StackPanel Grid.Column="1" Orientation="Horizontal">
                                 <Button Content="打开" Command="{Binding OpenDirectoryCommand}" Margin="0,0,7,0"/>
                                 <Button Content="复制 #N" Command="{Binding CopyThreadPrefixCommand}" Margin="0,0,7,0"/>
                                 <Button Content="停止" Command="{Binding StopCommand}" IsEnabled="{Binding CanStop}" Foreground="{DynamicResource ErrorBrush}" Margin="0,0,7,0"/>
-                                <Menu Background="Transparent" VerticalAlignment="Center"><MenuItem Header="•••"><MenuItem Header="复制 Thread ID" Command="{Binding CopyThreadIdCommand}"/><MenuItem Header="重新验证持久化" Command="{Binding VerifyPersistenceCommand}"/></MenuItem></Menu>
+                                <Button Content="•••" Click="MoreMenu_Click" MinWidth="44" Padding="10,7">
+                                    <Button.ContextMenu>
+                                        <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                            <MenuItem Header="复制会话 ID" Command="{Binding CopyThreadIdCommand}"/>
+                                            <MenuItem Header="重新检查保存状态" Command="{Binding VerifyPersistenceCommand}"/>
+                                        </ContextMenu>
+                                    </Button.ContextMenu>
+                                </Button>
                             </StackPanel>
                         </Grid>
                     </Border>
@@ -119,22 +125,22 @@
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
                                     </Grid.RowDefinitions>
-                                    <TextBlock Text="Thread ID" Foreground="{StaticResource MutedBrush}" Margin="0,2" />
+                                    <TextBlock Text="会话 ID" Foreground="{DynamicResource MutedBrush}" Margin="0,2" />
                                     <TextBox Grid.Column="1" Text="{Binding SelectedDetail.ThreadId, Mode=OneWay}" Style="{StaticResource ReadOnlyTextStyle}" FontFamily="Consolas" Margin="0,2" />
-                                    <TextBlock Grid.Row="1" Text="项目目录" Foreground="{StaticResource MutedBrush}" Margin="0,2" />
+                                    <TextBlock Grid.Row="1" Text="项目目录" Foreground="{DynamicResource MutedBrush}" Margin="0,2" />
                                     <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding SelectedDetail.Cwd, Mode=OneWay}" Style="{StaticResource ReadOnlyTextStyle}" Margin="0,2" />
-                                    <TextBlock Grid.Row="2" Text="模型" Foreground="{StaticResource MutedBrush}" Margin="0,2" />
-                                    <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding SelectedDetail.Model}" Margin="0,2" />
-                                    <TextBlock Grid.Row="3" Text="创建时间" Foreground="{StaticResource MutedBrush}" Margin="0,2" />
-                                    <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding SelectedDetail.CreatedAt}" Margin="0,2" />
-                                    <TextBlock Grid.Row="4" Text="更新时间" Foreground="{StaticResource MutedBrush}" Margin="0,2" />
-                                    <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding SelectedDetail.UpdatedAt}" Margin="0,2" />
+                                    <TextBlock Grid.Row="2" Text="模型" Foreground="{DynamicResource MutedBrush}" Margin="0,2" Visibility="{Binding SelectedDetail.ModelVisibility}" />
+                                    <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding SelectedDetail.Model}" Margin="0,2" Visibility="{Binding SelectedDetail.ModelVisibility}" />
+                                    <TextBlock Grid.Row="3" Text="创建时间" Foreground="{DynamicResource MutedBrush}" Margin="0,2" />
+                                    <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding SelectedDetail.CreatedAtDisplay}" Margin="0,2" />
+                                    <TextBlock Grid.Row="4" Text="最后更新" Foreground="{DynamicResource MutedBrush}" Margin="0,2" />
+                                    <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding SelectedDetail.UpdatedAtDisplay}" Margin="0,2" />
                                 </Grid>
                             </Border>
 
                             <Border Visibility="{Binding PersistenceVerificationVisibility}" Background="{DynamicResource CodeBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,14">
                                 <StackPanel>
-                                    <TextBlock Text="持久化验证" FontWeight="SemiBold" />
+                                    <TextBlock Text="会话检查结果" FontWeight="SemiBold" />
                                     <TextBox Text="{Binding PersistenceVerificationText, Mode=OneWay}" Style="{StaticResource ReadOnlyTextStyle}" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,6,0,0" />
                                 </StackPanel>
                             </Border>
@@ -150,13 +156,13 @@
                                                         <ColumnDefinition Width="Auto" />
                                                     </Grid.ColumnDefinitions>
                                                     <TextBlock Text="{Binding Title}" FontSize="16" FontWeight="SemiBold" />
-                                                    <TextBlock Grid.Column="1" Text="等待本机处理" Foreground="#8A5A00" />
+                                                    <TextBlock Grid.Column="1" Text="{Binding WaitingText}" Foreground="{DynamicResource WarningBrush}" />
                                                 </Grid>
                                                 <TextBox Text="{Binding Description, Mode=OneWay}" Style="{StaticResource ReadOnlyTextStyle}" Margin="0,7,0,0" />
-                                                <Border Visibility="{Binding CommandVisibility}" Background="#202A34" CornerRadius="4" Padding="10" Margin="0,10,0,0">
+                                                <Border Visibility="{Binding CommandVisibility}" Background="{DynamicResource CodeBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,10,0,0">
                                                     <StackPanel>
-                                                        <TextBox Text="{Binding Command, Mode=OneWay}" Style="{StaticResource ReadOnlyTextStyle}" Foreground="#F2F5F7" FontFamily="Consolas" />
-                                                        <TextBox Text="{Binding Cwd, Mode=OneWay}" Style="{StaticResource ReadOnlyTextStyle}" Foreground="#AEB9C4" FontSize="11" Margin="0,5,0,0" />
+                                                        <TextBox Text="{Binding Command, Mode=OneWay}" Style="{StaticResource ReadOnlyTextStyle}" Foreground="{DynamicResource PrimaryTextBrush}" FontFamily="Consolas" />
+                                                        <TextBox Text="{Binding Cwd, Mode=OneWay}" Style="{StaticResource ReadOnlyTextStyle}" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" Margin="0,5,0,0" />
                                                     </StackPanel>
                                                 </Border>
                                                 <TextBox Visibility="{Binding FileChangesVisibility}" Text="{Binding FileChangesText, Mode=OneWay}" Style="{StaticResource CodeTextStyle}" Margin="0,10,0,0" />
@@ -195,7 +201,7 @@
                                                 <StackPanel Visibility="{Binding ApprovalVisibility}" Orientation="Horizontal" Margin="0,12,0,0">
                                                     <Button Content="允许一次" Visibility="{Binding AllowVisibility}"
                                                             Command="{Binding DataContext.AllowInteractionCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"
-                                                            Background="{StaticResource AccentBrush}" Foreground="White" />
+                                                            Style="{StaticResource PrimaryButtonStyle}" />
                                                     <Button Content="拒绝" Command="{Binding DataContext.DenyInteractionCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" />
                                                 </StackPanel>
                                             </StackPanel>
@@ -215,7 +221,7 @@
                                                         <ColumnDefinition Width="*" />
                                                         <ColumnDefinition Width="Auto" />
                                                     </Grid.ColumnDefinitions>
-                                                    <StackPanel Orientation="Horizontal"><TextBlock Text="{Binding Title}" FontWeight="SemiBold"/><TextBlock Text="{Binding Timestamp}" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" Margin="9,1,0,0"/></StackPanel>
+                                                    <StackPanel Orientation="Horizontal"><TextBlock Text="{Binding Title}" FontWeight="SemiBold"/><TextBlock Text="{Binding TimestampDisplay}" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" Margin="9,1,0,0"/></StackPanel>
                                                     <Border Grid.Column="1" Style="{StaticResource BadgeStyle}"><TextBlock Text="{Binding Status}" Foreground="{Binding StatusBrush}" FontSize="11" /></Border>
                                                 </Grid>
                                                 <TextBox Text="{Binding Text, Mode=OneWay}" Style="{StaticResource ReadOnlyTextStyle}" Margin="0,9,0,0" Visibility="{Binding MessageVisibility}" FontSize="14" />
@@ -230,7 +236,7 @@
                         </StackPanel>
                     </ScrollViewer>
 
-                    <Border Grid.Row="2" BorderBrush="#DDE3EA" BorderThickness="0,1,0,0" Padding="16">
+                    <Border Grid.Row="2" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="16">
                         <StackPanel>
                             <TextBox Text="{Binding ActionError, Mode=OneWay}" Style="{StaticResource ReadOnlyTextStyle}" Foreground="{DynamicResource ErrorBrush}" Visibility="{Binding ActionErrorVisibility}" Margin="0,0,0,8" />
                             <Grid>
@@ -245,9 +251,8 @@
                                     </TextBox.InputBindings>
                                 </TextBox>
                                 <StackPanel Grid.Column="1" Margin="10,0,0,0">
-                                    <Button Content="发送" Command="{Binding SendCommand}" IsEnabled="{Binding CanSend}" MinWidth="88"
-                                            Background="{StaticResource AccentBrush}" Foreground="White" />
-                                    <TextBlock Text="Ctrl+Enter" Foreground="{StaticResource MutedBrush}" HorizontalAlignment="Center" FontSize="11" Margin="0,4,0,0" />
+                                    <Button Content="发送" Command="{Binding SendCommand}" IsEnabled="{Binding CanSend}" MinWidth="88" Style="{StaticResource PrimaryButtonStyle}" />
+                                    <TextBlock Text="Ctrl+Enter" Foreground="{DynamicResource MutedBrush}" HorizontalAlignment="Center" FontSize="11" Margin="0,4,0,0" />
                                 </StackPanel>
                             </Grid>
                         </StackPanel>

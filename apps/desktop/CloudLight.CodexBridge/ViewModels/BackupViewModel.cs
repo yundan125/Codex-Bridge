@@ -50,7 +50,7 @@ public sealed class BackupViewModel : ObservableObject
     public ObservableCollection<string> RecentOperations { get; } = [];
     public string CodexHome => _service.CodexHome;
     public string BridgeData => _service.BridgeLocalData;
-    public string AppVersion => Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.7.0";
+    public string AppVersion => Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.7.1";
 
     public bool IncludeCodex { get => _includeCodex; set => SetProperty(ref _includeCodex, value); }
     public bool IncludeBridge { get => _includeBridge; set => SetProperty(ref _includeBridge, value); }
@@ -71,7 +71,7 @@ public sealed class BackupViewModel : ObservableObject
         }
     }
     public string BackupDetails => SelectedManifest is null ? "" :
-        $"备份时间  {SelectedManifest.CreatedAt:yyyy-MM-dd HH:mm:ss}\n应用版本  {SelectedManifest.AppVersion}\nCodex 版本  {ValueOrDash(SelectedManifest.CodexVersion)}\n包含内容  {(SelectedManifest.IncludedCodex ? "Codex " : "")}{(SelectedManifest.IncludedBridge ? "Bridge" : "")}\n文件数量  {SelectedManifest.FileCount:N0}\n总大小  {FormatSize(SelectedManifest.TotalSize)}";
+        $"备份时间  {SelectedManifest.CreatedAt.ToLocalTime():yyyy-MM-dd HH:mm}\n应用版本  {SelectedManifest.AppVersion}\nCodex 版本  {ValueOrDash(SelectedManifest.CodexVersion)}\n包含内容  {(SelectedManifest.IncludedCodex ? "Codex " : "")}{(SelectedManifest.IncludedBridge ? "应用数据" : "")}\n文件数量  {SelectedManifest.FileCount:N0}\n总大小  {FormatSize(SelectedManifest.TotalSize)}";
     public Visibility BackupDetailsVisibility => SelectedManifest is null ? Visibility.Collapsed : Visibility.Visible;
     public string OperationText { get => _operationText; private set => SetProperty(ref _operationText, value); }
     public string ProgressStage { get => _progressStage; private set => SetProperty(ref _progressStage, value); }
@@ -85,7 +85,7 @@ public sealed class BackupViewModel : ObservableObject
             var scan = await _service.ScanAsync(true, true);
             DataSummary = $"{scan.Files:N0} 个文件 · {FormatSize(scan.Size)}";
         }
-        catch (Exception exception) { DataSummary = $"扫描失败：{exception.Message}"; }
+        catch (Exception exception) { DataSummary = UiText.UserError(exception, "扫描数据"); }
     }
 
     private async Task CreateBackupAsync()
@@ -112,7 +112,7 @@ public sealed class BackupViewModel : ObservableObject
             AddRecent(OperationText);
         }
         catch (OperationCanceledException) { OperationText = "备份已取消，未保留未完成文件。"; }
-        catch (Exception exception) { OperationText = $"备份失败：{exception.Message}"; _logs.AddException("backup", "创建完整备份失败。", exception); }
+        catch (Exception exception) { OperationText = UiText.UserError(exception, "创建备份"); _logs.AddException("backup", "创建完整备份失败。", exception); }
         finally { _backupCancellation.Dispose(); _backupCancellation = null; Busy = false; }
     }
 
@@ -133,7 +133,8 @@ public sealed class BackupViewModel : ObservableObject
         {
             SelectedManifest = null;
             SelectedBackup = "";
-            OperationText = $"备份文件损坏或不完整：{exception.Message}";
+            OperationText = "备份文件损坏或不完整，无法恢复。详情已写入运行日志。";
+            _logs.AddException("backup", "读取备份文件失败。", exception);
         }
         finally { Busy = false; }
     }
@@ -143,7 +144,7 @@ public sealed class BackupViewModel : ObservableObject
         if (SelectedManifest is null || string.IsNullOrWhiteSpace(SelectedBackup)) return;
         if (!RestoreCodex && !RestoreBridge) { OperationText = "请至少选择一项恢复内容。"; return; }
         var mode = ReplaceMode ? "完整替换" : "合并";
-        if (System.Windows.MessageBox.Show($"即将以“{mode}”模式恢复。完整替换会先自动创建 PreRestore 备份，然后停止 Bridge Runtime。是否继续？", "确认恢复", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+        if (System.Windows.MessageBox.Show($"即将以“{mode}”方式恢复。恢复前会自动备份当前数据，以便需要时回退。是否继续？", "确认恢复", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         Busy = true;
         try
         {
@@ -159,7 +160,7 @@ public sealed class BackupViewModel : ObservableObject
             OperationText = $"恢复完成：{result.RestoredFiles:N0} 个文件。恢复前备份：{result.PreRestoreBackupPath}";
             AddRecent(OperationText);
         }
-        catch (Exception exception) { OperationText = $"恢复失败：{exception.Message}"; _logs.AddException("backup", "完整恢复失败。", exception); }
+        catch (Exception exception) { OperationText = UiText.UserError(exception, "恢复备份"); _logs.AddException("backup", "完整恢复失败。", exception); }
         finally { Busy = false; }
     }
 

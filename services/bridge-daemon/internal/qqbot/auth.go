@@ -101,7 +101,7 @@ func (p *TokenProvider) fetch(parent context.Context) (string, time.Time, error)
 		return "", time.Time{}, newError("qqbot_protocol_error", "Unable to create QQ token request", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "CloudLight-Codex-Bridge/0.7.0")
+	req.Header.Set("User-Agent", "CloudLight-Codex-Bridge/0.7.1")
 	response, err := p.http.Do(req)
 	if err != nil {
 		if ctx.Err() != nil {

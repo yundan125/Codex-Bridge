@@ -11,7 +11,7 @@
             </Border>
             <Border Style="{StaticResource CardStyle}" Visibility="{Binding ErrorVisibility}">
                 <StackPanel>
-                    <TextBlock Text="远程渠道配置读取失败" FontSize="18" FontWeight="SemiBold" Foreground="#A33A2B" />
+                    <TextBlock Text="无法读取远程渠道设置" FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource ErrorBrush}" />
                     <TextBlock Text="{Binding LoadError}" Margin="0,9,0,0" TextWrapping="Wrap" />
                     <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
                         <Button Content="重试" Command="{Binding RetryCommand}" />
@@ -28,7 +28,7 @@
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                             <StackPanel>
                                 <TextBlock Text="Telegram" FontSize="21" FontWeight="SemiBold" />
-                                <TextBlock Text="{Binding StatusText}" Foreground="{StaticResource AccentBrush}" FontWeight="SemiBold" Margin="0,5,0,0" />
+                                <TextBlock Text="{Binding StatusText}" Foreground="{DynamicResource AccentBrush}" FontWeight="SemiBold" Margin="0,5,0,0" />
                             </StackPanel>
                             <StackPanel Grid.Column="1" Orientation="Horizontal">
                                 <Button Content="测试凭据" Command="{Binding TestCommand}" />
@@ -43,12 +43,12 @@
                             <Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="18"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                             <StackPanel>
                                 <TextBlock Text="Bot Token" FontWeight="SemiBold" />
-                                <TextBlock Text="Token 仅写入当前 Windows 用户的 DPAPI 密文文件。" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,7" />
+                                <TextBlock Text="机器人密钥会安全保存到本机。" Foreground="{DynamicResource MutedBrush}" Margin="0,4,0,7" />
                                 <PasswordBox x:Name="TokenBox" Padding="10,7" />
                                 <StackPanel Orientation="Horizontal" Margin="0,7,0,0">
                                     <Button Content="安全保存 Token" Click="SaveToken_Click" />
                                     <Button Content="删除 Token" Click="DeleteToken_Click" />
-                                    <TextBlock Text="{Binding TokenSummary}" Margin="10,0,0,0" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" />
+                                    <TextBlock Text="{Binding TokenSummary}" Margin="10,0,0,0" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}" />
                                 </StackPanel>
                                 <TextBlock Text="代理模式" FontWeight="SemiBold" Margin="0,16,0,6" />
                                 <ComboBox SelectedValue="{Binding ProxyMode}" SelectedValuePath="Tag">
@@ -66,11 +66,11 @@
                             <Border Grid.Column="2" Background="{DynamicResource CodeBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="14">
                                 <StackPanel>
                                     <TextBlock Text="Telegram 状态" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,10" />
-                                    <TextBlock Text="Bot" Foreground="{StaticResource MutedBrush}"/><TextBlock Text="{Binding BotName}" Margin="0,2,0,8"/>
-                                    <TextBlock Text="Polling" Foreground="{StaticResource MutedBrush}"/><TextBlock Text="{Binding PollingState}" Margin="0,2,0,8"/>
-                                    <TextBlock Text="最近更新" Foreground="{StaticResource MutedBrush}"/><TextBlock Text="{Binding LastUpdateAt}" Margin="0,2,0,8"/>
-                                    <TextBlock Text="绑定数" Foreground="{StaticResource MutedBrush}"/><TextBlock Text="{Binding BindingCount}" Margin="0,2,0,8"/>
-                                    <TextBlock Text="最后错误" Foreground="{StaticResource MutedBrush}"/><TextBlock Text="{Binding LastError}" Foreground="#A33A2B" TextWrapping="Wrap"/>
+                                    <TextBlock Text="Bot" Foreground="{DynamicResource MutedBrush}"/><TextBlock Text="{Binding BotName}" Margin="0,2,0,8"/>
+                                    <TextBlock Text="接收状态" Foreground="{DynamicResource MutedBrush}"/><TextBlock Text="{Binding PollingState}" Margin="0,2,0,8"/>
+                                    <TextBlock Text="最近更新" Foreground="{DynamicResource MutedBrush}"/><TextBlock Text="{Binding LastUpdateAt}" Margin="0,2,0,8"/>
+                                    <TextBlock Text="关联会话数" Foreground="{DynamicResource MutedBrush}"/><TextBlock Text="{Binding BindingCount}" Margin="0,2,0,8"/>
+                                    <TextBlock Text="最近错误" Foreground="{DynamicResource MutedBrush}"/><TextBlock Text="{Binding LastError}" Foreground="{DynamicResource ErrorBrush}" TextWrapping="Wrap"/>
                                 </StackPanel>
                             </Border>
                         </Grid>
@@ -81,14 +81,14 @@
 
                 <Border Style="{StaticResource CardStyle}" Margin="0,18,0,0">
                     <StackPanel>
-                        <TextBlock FontSize="18" FontWeight="SemiBold"><Run Text="Telegram 绑定 ("/><Run Text="{Binding BindingCount, Mode=OneWay}"/><Run Text=")"/></TextBlock>
+                        <TextBlock FontSize="18" FontWeight="SemiBold"><Run Text="Telegram 关联会话（"/><Run Text="{Binding BindingCount, Mode=OneWay}"/><Run Text="）"/></TextBlock>
                         <ItemsControl ItemsSource="{Binding Bindings}">
                             <ItemsControl.ItemTemplate><DataTemplate>
-                                <Border BorderBrush="#E1E6EC" BorderThickness="0,1,0,0" Padding="4,10">
+                                <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="4,10">
                                     <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="2*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                         <TextBlock Text="{Binding ChatId}" TextWrapping="Wrap"/>
-                                        <StackPanel Grid.Column="1"><TextBlock Text="{Binding DisplayThreadTitle}" FontWeight="SemiBold"/><TextBlock Text="{Binding ShortThreadId}" Foreground="{StaticResource MutedBrush}"/></StackPanel>
-                                        <TextBlock Grid.Column="2" Text="{Binding CreatedAt}" TextWrapping="Wrap"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding DisplayThreadTitle}" FontWeight="SemiBold"/>
+                                        <TextBlock Grid.Column="2" Text="{Binding CreatedAtDisplay}" TextWrapping="Wrap"/>
                                         <Button Grid.Column="3" Content="删除" Tag="{Binding Id}" Click="DeleteBinding_Click"/>
                                     </Grid>
                                 </Border>
@@ -102,9 +102,9 @@
                         <Grid>
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                             <StackPanel>
-                                <TextBlock Text="QQ 官方机器人" FontSize="21" FontWeight="SemiBold" />
-                                <TextBlock Text="通过 QQ 官方机器人平台连接 QQ，无需安装 QQ PC 客户端或 NapCat。" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,0" />
-                                <TextBlock Text="{Binding StatusText}" Foreground="{StaticResource AccentBrush}" FontWeight="SemiBold" Margin="0,5,0,0" />
+                                <TextBlock Text="QQ 机器人" FontSize="21" FontWeight="SemiBold" />
+                                <TextBlock Text="通过 QQ 官方机器人连接 QQ。" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,0" />
+                                <TextBlock Text="{Binding StatusText}" Foreground="{DynamicResource AccentBrush}" FontWeight="SemiBold" Margin="0,5,0,0" />
                             </StackPanel>
                             <StackPanel Grid.Column="1" Orientation="Horizontal">
                                 <Button Content="测试凭据" Command="{Binding TestCommand}"/>
@@ -121,21 +121,21 @@
 						<Border Background="{DynamicResource WarningSurfaceBrush}" CornerRadius="6" Padding="10" Margin="0,12,0,0" Visibility="{Binding AuxiliaryErrorVisibility}">
 							<TextBlock Text="{Binding AuxiliaryLoadMessage}" TextWrapping="Wrap"/>
 						</Border>
-                        <Expander Header="凭据、连接、代理、Allowlist 与高级设置" IsExpanded="False" Margin="0,16,0,0">
+                        <Expander Header="凭据、连接、代理、允许账号与高级设置" IsExpanded="False" Margin="0,16,0,0">
                         <Grid Margin="0,14,0,0">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="18"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                             <StackPanel>
                                 <TextBlock Text="应用凭据" FontSize="16" FontWeight="SemiBold"/>
                                 <TextBlock Text="AppID" FontWeight="SemiBold" Margin="0,10,0,5"/>
                                 <TextBox Text="{Binding AppId, UpdateSourceTrigger=PropertyChanged}"/>
-                                <TextBlock Text="AppSecret" FontWeight="SemiBold" Margin="0,10,0,5"/>
+                                <TextBlock Text="AppSecret（应用密钥）" FontWeight="SemiBold" Margin="0,10,0,5"/>
                                 <PasswordBox x:Name="QqSecretBox" Padding="10,7"/>
                                 <StackPanel Orientation="Horizontal" Margin="0,7,0,0">
-                                    <Button Content="安全保存 AppSecret" Click="SaveQqSecret_Click"/>
-                                    <Button Content="删除 AppSecret" Click="DeleteQqSecret_Click"/>
-                                    <TextBlock Text="{Binding SecretStatusText}" Margin="10,0,0,0" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}"/>
+                                    <Button Content="安全保存应用密钥" Click="SaveQqSecret_Click"/>
+                                    <Button Content="删除应用密钥" Click="DeleteQqSecret_Click"/>
+                                    <TextBlock Text="{Binding SecretStatusText}" Margin="10,0,0,0" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>
                                 </StackPanel>
-                                <TextBlock Text="AppSecret 使用 Windows DPAPI 当前用户作用域保存，不写入 settings.json、日志、SSE 或状态 API。保存后输入框会清空。" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,0"/>
+                                <TextBlock Text="应用密钥会安全保存到本机。保存后输入框会清空。" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,0"/>
 
                                 <TextBlock Text="环境" FontWeight="SemiBold" Margin="0,16,0,5"/>
                                 <TextBlock Text="{Binding EnvironmentText}"/>
@@ -148,35 +148,28 @@
                                     <TextBox Text="{Binding ProxyUrl, UpdateSourceTrigger=PropertyChanged}" ToolTip="例如 http://127.0.0.1:7897"/>
                                 </StackPanel>
 
-                                <TextBlock Text="允许的 C2C User OpenID（每行一个）" FontWeight="SemiBold" Margin="0,16,0,5"/>
+                                <TextBlock Text="允许的用户标识（OpenID，每行一个）" FontWeight="SemiBold" Margin="0,16,0,5"/>
                                 <TextBox Text="{Binding AllowedUserOpenIdsText, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" MinHeight="70"/>
-                                <TextBlock Text="允许的 Group OpenID（每行一个）" FontWeight="SemiBold" Margin="0,12,0,5"/>
+                                <TextBlock Text="允许的群聊标识（每行一个）" FontWeight="SemiBold" Margin="0,12,0,5"/>
                                 <TextBox Text="{Binding AllowedGroupOpenIdsText, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" MinHeight="70"/>
-                                <TextBlock Text="允许的 Group Member OpenID（每行一个；为空时拒绝群聊控制）" FontWeight="SemiBold" Margin="0,12,0,5" TextWrapping="Wrap"/>
+                                <TextBlock Text="允许的群成员标识（每行一个；为空时不接受群聊控制）" FontWeight="SemiBold" Margin="0,12,0,5" TextWrapping="Wrap"/>
                                 <TextBox Text="{Binding AllowedGroupMemberOpenIdsText, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" MinHeight="70"/>
                                 <CheckBox Content="自动启动" IsChecked="{Binding AutoStart}" Margin="0,14,0,5"/>
-                                <CheckBox Content="Gateway 自动重连" IsChecked="{Binding GatewayReconnectEnabled}" Margin="0,0,0,5"/>
+                                <CheckBox Content="断线后自动重连" IsChecked="{Binding GatewayReconnectEnabled}" Margin="0,0,0,5"/>
                                 <CheckBox Content="发送重要进度更新" IsChecked="{Binding SendProgressUpdates}"/>
-                                <Button Content="保存 QQ Bot 配置" Command="{Binding SaveSettingsCommand}" HorizontalAlignment="Left" Margin="0,12,0,0"/>
+                                <Button Content="保存 QQ 机器人设置" Command="{Binding SaveSettingsCommand}" HorizontalAlignment="Left" Margin="0,12,0,0"/>
                             </StackPanel>
 
                             <Border Grid.Column="2" Background="{DynamicResource CodeBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="14">
                                 <StackPanel>
-                                    <TextBlock Text="Bot / Gateway 状态" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,10"/>
-                                    <TextBlock Text="Configured / Running / Connected" Foreground="{StaticResource MutedBrush}"/>
-                                    <TextBlock Margin="0,2,0,8"><Run Text="{Binding Configured, Mode=OneWay}"/><Run Text=" / "/><Run Text="{Binding Running, Mode=OneWay}"/><Run Text=" / "/><Run Text="{Binding Connected, Mode=OneWay}"/></TextBlock>
-                                    <TextBlock Text="AppID" Foreground="{StaticResource MutedBrush}"/><TextBlock Text="{Binding AppId}" Margin="0,2,0,8"/>
-                                    <TextBlock Text="Gateway 状态" Foreground="{StaticResource MutedBrush}"/><TextBlock Text="{Binding GatewayState}" Margin="0,2,0,8"/>
-                                    <TextBlock Text="Session ID（短值）" Foreground="{StaticResource MutedBrush}"/><TextBlock Text="{Binding SessionIdShort}" Margin="0,2,0,8"/>
-                                    <TextBlock Text="最后连接" Foreground="{StaticResource MutedBrush}"/><TextBlock Text="{Binding LastConnectedAt}" TextWrapping="Wrap" Margin="0,2,0,8"/>
-                                    <TextBlock Text="最后心跳" Foreground="{StaticResource MutedBrush}"/><TextBlock Text="{Binding LastHeartbeatAt}" TextWrapping="Wrap" Margin="0,2,0,8"/>
-                                    <TextBlock Text="最后事件" Foreground="{StaticResource MutedBrush}"/><TextBlock Text="{Binding LastDispatchAt}" TextWrapping="Wrap" Margin="0,2,0,8"/>
-                                    <TextBlock Text="Token 到期时间" Foreground="{StaticResource MutedBrush}"/><TextBlock Text="{Binding AccessTokenExpiresAt}" TextWrapping="Wrap" Margin="0,2,0,8"/>
-                                    <TextBlock Text="重连次数" Foreground="{StaticResource MutedBrush}"/><TextBlock Text="{Binding ReconnectCount}" Margin="0,2,0,8"/>
-                                    <TextBlock Text="Allowlist：C2C / Group / Member" Foreground="{StaticResource MutedBrush}"/>
+                                    <TextBlock Text="QQ 状态" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,10"/>
+                                    <TextBlock Text="连接状态" Foreground="{DynamicResource MutedBrush}"/><TextBlock Text="{Binding StatusText}" Margin="0,2,0,8"/>
+                                    <TextBlock Text="AppID" Foreground="{DynamicResource MutedBrush}"/><TextBlock Text="{Binding AppId}" Margin="0,2,0,8"/>
+                                    <TextBlock Text="最后连接" Foreground="{DynamicResource MutedBrush}"/><TextBlock Text="{Binding LastConnectedAt}" TextWrapping="Wrap" Margin="0,2,0,8"/>
+                                    <TextBlock Text="允许的用户 / 群聊 / 群成员" Foreground="{DynamicResource MutedBrush}"/>
                                     <TextBlock Margin="0,2,0,8"><Run Text="{Binding AllowedUserCount, Mode=OneWay}"/><Run Text=" / "/><Run Text="{Binding AllowedGroupCount, Mode=OneWay}"/><Run Text=" / "/><Run Text="{Binding AllowedGroupMemberCount, Mode=OneWay}"/></TextBlock>
-                                    <TextBlock Text="代理" Foreground="{StaticResource MutedBrush}"/><TextBlock Text="{Binding EffectiveProxy}" Margin="0,2,0,8"/>
-                                    <TextBlock Text="最近错误" Foreground="{StaticResource MutedBrush}"/><TextBlock Text="{Binding LastError}" Foreground="#A33A2B" TextWrapping="Wrap"/>
+                                    <TextBlock Text="代理" Foreground="{DynamicResource MutedBrush}"/><TextBlock Text="{Binding EffectiveProxy}" Margin="0,2,0,8"/>
+                                    <TextBlock Text="最近错误" Foreground="{DynamicResource MutedBrush}"/><TextBlock Text="{Binding LastError}" Foreground="{DynamicResource ErrorBrush}" TextWrapping="Wrap"/>
                                 </StackPanel>
                             </Border>
                         </Grid>
@@ -187,15 +180,15 @@
 
                 <Border Style="{StaticResource CardStyle}" Margin="0,18,0,0" DataContext="{Binding Qq}">
                     <StackPanel>
-                        <TextBlock Text="最近发现的 QQ 身份" FontSize="18" FontWeight="SemiBold"/>
-                        <TextBlock Text="未授权事件不会进入 Codex；这里只在本机保留最多 20 个 OpenID 和时间，不保存消息正文。" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,10"/>
+                        <TextBlock Text="最近发现的 QQ 账号" FontSize="18" FontWeight="SemiBold"/>
+                        <TextBlock Text="你可以把最近联系过机器人的用户或群聊加入允许列表。" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,10"/>
                         <ItemsControl ItemsSource="{Binding DiscoveredIdentities}"><ItemsControl.ItemTemplate><DataTemplate>
-                            <Border BorderBrush="#E1E6EC" BorderThickness="0,1,0,0" Padding="4,10">
+                            <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="4,10">
                                 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="0.6*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="2*"/><ColumnDefinition Width="1.3*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                    <TextBlock Text="{Binding Type}"/>
+                                    <TextBlock Text="{Binding TypeDisplay}"/>
                                     <TextBlock Grid.Column="1" Text="{Binding DisplayName}"/>
                                     <StackPanel Grid.Column="2"><TextBlock Text="{Binding UserOpenId}" TextWrapping="Wrap"/><TextBlock Text="{Binding GroupOpenId}" TextWrapping="Wrap"/><TextBlock Text="{Binding GroupMemberOpenId}" TextWrapping="Wrap"/></StackPanel>
-                                    <TextBlock Grid.Column="3" Text="{Binding DiscoveredAt}" TextWrapping="Wrap"/>
+                                    <TextBlock Grid.Column="3" Text="{Binding DiscoveredAtDisplay}" TextWrapping="Wrap"/>
                                     <Button Grid.Column="4" Content="添加到允许列表" Tag="{Binding}" Click="AddQqIdentity_Click"/>
                                 </Grid>
                             </Border>
@@ -205,15 +198,15 @@
 
                 <Border Style="{StaticResource CardStyle}" Margin="0,18,0,0" DataContext="{Binding Qq}">
                     <StackPanel>
-                        <TextBlock FontSize="18" FontWeight="SemiBold"><Run Text="QQ Binding ("/><Run Text="{Binding Bindings.Count, Mode=OneWay}"/><Run Text=")"/></TextBlock>
-                        <TextBlock Text="官方 Bot 使用 qqbot/c2c 或 qqbot/group；旧 qq Binding 显示为 Legacy NapCat Binding，不参与路由。" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,10"/>
+                        <TextBlock FontSize="18" FontWeight="SemiBold"><Run Text="QQ 关联会话（"/><Run Text="{Binding Bindings.Count, Mode=OneWay}"/><Run Text="）"/></TextBlock>
+                        <TextBlock Text="这里显示当前仍可使用的 QQ 关联会话。" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,10"/>
                         <ItemsControl ItemsSource="{Binding Bindings}"><ItemsControl.ItemTemplate><DataTemplate>
-                            <Border BorderBrush="#E1E6EC" BorderThickness="0,1,0,0" Padding="4,10">
+                            <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="4,10">
                                 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="1.5*"/><ColumnDefinition Width="2*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                    <StackPanel><TextBlock Text="{Binding ConversationType}"/><TextBlock Text="{Binding ChannelType}" Foreground="{StaticResource MutedBrush}"/></StackPanel>
+                                    <StackPanel><TextBlock Text="{Binding ConversationTypeDisplay}"/><TextBlock Text="{Binding ChannelTypeDisplay}" Foreground="{DynamicResource MutedBrush}"/></StackPanel>
                                     <TextBlock Grid.Column="1" Text="{Binding SafeChatSummary}" TextWrapping="Wrap"/>
-                                    <StackPanel Grid.Column="2"><TextBlock Text="{Binding DisplayThreadTitle}" FontWeight="SemiBold"/><TextBlock Text="{Binding ShortThreadId}" Foreground="{StaticResource MutedBrush}"/></StackPanel>
-                                    <StackPanel Grid.Column="3"><TextBlock Text="{Binding CreatedAt}" TextWrapping="Wrap"/><TextBlock Text="{Binding LegacyLabel}" Foreground="#A36A00"/></StackPanel>
+                                    <TextBlock Grid.Column="2" Text="{Binding DisplayThreadTitle}" FontWeight="SemiBold"/>
+                                    <StackPanel Grid.Column="3"><TextBlock Text="{Binding CreatedAtDisplay}" TextWrapping="Wrap"/><TextBlock Text="{Binding LegacyLabel}" Foreground="{DynamicResource WarningBrush}"/></StackPanel>
                                     <Button Grid.Column="4" Content="删除" Tag="{Binding Id}" Click="DeleteQqBinding_Click"/>
                                 </Grid>
                             </Border>

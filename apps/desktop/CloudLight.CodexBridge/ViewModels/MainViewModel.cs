@@ -58,7 +58,7 @@ public sealed class MainViewModel : ObservableObject
     public ICommand RefreshCommand { get; }
     public string CurrentPageKey { get; private set; }
     public string PageTitle => CurrentPageKey switch { "sessions" => "Codex 会话", "channels" => "远程渠道", "mirror" => "消息同步", "backup" => "备份与恢复", "settings" => "设置", "logs" => "运行日志", _ => "概览" };
-    public string PageDescription => CurrentPageKey switch { "sessions" => "浏览真实 Thread、处理交互并继续对话", "channels" => "统一管理 QQ 官方机器人与 Telegram", "mirror" => "只同步 Codex 最终回答的安静模式", "backup" => "完整迁移 Codex 与 CloudLight Codex Bridge 数据", "settings" => "启动、窗口、外观与 Codex 行为", "logs" => "查看本机运行信息和错误", _ => "Codex、远程渠道与同步状态一览" };
+    public string PageDescription => CurrentPageKey switch { "sessions" => "浏览会话、处理等待事项并继续对话", "channels" => "管理 QQ 机器人与 Telegram", "mirror" => "将 Codex 的最终回答发送到指定渠道", "backup" => "备份或恢复 Codex 与应用数据", "settings" => "管理启动、窗口、外观与 Codex 设置", "logs" => "查看本机运行信息和错误详情", _ => "查看 Codex、远程渠道与消息同步状态" };
     public bool IsOverviewPage => CurrentPageKey == "overview";
     public bool IsSessionsPage => CurrentPageKey == "sessions";
     public bool IsChannelsPage => CurrentPageKey == "channels";
@@ -81,7 +81,7 @@ public sealed class MainViewModel : ObservableObject
             var ready = await _daemon.StartAsync(_settings, _lifetime.Token);
             _api.Connect(new Uri(ready.Address), _daemon.Token);
             _api.StartEventStream();
-            BackendState = $"运行中 · PID {ready.Pid}";
+            BackendState = "运行中";
             await RefreshAsync();
             await Settings.RefreshMirrorAsync();
             if (CurrentPageKey == "channels") await Channels.EnsureInitializedAsync(_lifetime.Token);
@@ -93,7 +93,7 @@ public sealed class MainViewModel : ObservableObject
             CodexCliState = "无法检测";
             AppServerState = "未运行";
             Overview.CodexState = "启动失败";
-            ErrorMessage = exception.Message;
+            ErrorMessage = UiText.UserError(exception, "启动");
             _logs.Add("desktop", exception.Message);
         }
     }
@@ -127,15 +127,15 @@ public sealed class MainViewModel : ObservableObject
             var status = await _api.GetStatusAsync(_lifetime.Token);
             BackendState = $"运行中 · v{status.Version}";
             CodexCliState = status.CodexCliAvailable ? $"已找到 · {status.CodexCliPath}" : "未找到";
-            AppServerState = status.AppServerRunning ? $"已连接 · PID {status.AppServerPid}" : "未连接";
+            AppServerState = status.AppServerRunning ? "已连接" : "未连接";
             Overview.CodexState = status.AppServerRunning ? "已连接" : status.CodexCliAvailable ? "CLI 已就绪" : "未连接";
             Settings.UpdateRuntimeStatus(status, BackendState);
-            ErrorMessage = status.LastError;
+            ErrorMessage = string.IsNullOrWhiteSpace(status.LastError) ? "" : UiText.UserError(status.LastError, "连接");
             if (status.AppServerRunning) await Sessions.RefreshAsync(_lifetime.Token);
         }
         catch (Exception exception)
         {
-            ErrorMessage = exception.Message;
+            ErrorMessage = UiText.UserError(exception, "刷新");
             _logs.Add("desktop", $"刷新失败：{exception.Message}");
         }
     }
@@ -198,7 +198,7 @@ public sealed class MainViewModel : ObservableObject
         catch (Exception exception) when (_stopped && exception is (TaskCanceledException or OperationCanceledException or ObjectDisposedException)) { }
         catch (Exception exception) { _logs.AddException("desktop", "UI 异步刷新失败。", exception); }
     }
-    public void ReportRecoverableUiException(Exception exception) => ErrorMessage = $"操作失败：{LogService.Redact(exception.Message)}。详情已写入日志。";
+    public void ReportRecoverableUiException(Exception exception) => ErrorMessage = UiText.UserError(exception);
 
     public async Task StopAsync()
     {

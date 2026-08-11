@@ -101,7 +101,7 @@ public sealed class QqChannelViewModel : ObservableObject
 
     public string AppId { get => _appId; set => SetProperty(ref _appId, value); }
     public string Environment => "production";
-    public string EnvironmentText => "正式环境（当前 QQ 官方 SDK）";
+    public string EnvironmentText => "正式环境";
     public string AllowedUserOpenIdsText { get => _allowedUserOpenIdsText; set => SetProperty(ref _allowedUserOpenIdsText, value); }
     public string AllowedGroupOpenIdsText { get => _allowedGroupOpenIdsText; set => SetProperty(ref _allowedGroupOpenIdsText, value); }
     public string AllowedGroupMemberOpenIdsText { get => _allowedGroupMemberOpenIdsText; set => SetProperty(ref _allowedGroupMemberOpenIdsText, value); }
@@ -124,8 +124,8 @@ public sealed class QqChannelViewModel : ObservableObject
     public bool Running { get => _running; private set { if (SetProperty(ref _running, value)) NotifyStatus(); } }
     public bool Connected { get => _connected; private set { if (SetProperty(ref _connected, value)) NotifyStatus(); } }
     public bool SecretConfigured { get => _secretConfigured; private set { if (SetProperty(ref _secretConfigured, value)) OnPropertyChanged(nameof(SecretStatusText)); } }
-    public string StatusText => !Configured ? "未配置" : Running ? (Connected ? "运行中 · Gateway 已连接" : "运行中 · 正在连接") : "已配置 · 已停止";
-    public string SecretStatusText => SecretConfigured ? "已通过 Windows DPAPI 安全保存" : "未保存";
+    public string StatusText => !Configured ? "未配置" : Running ? (Connected ? "运行中 · 已连接" : "运行中 · 正在连接") : "已配置 · 已停止";
+    public string SecretStatusText => SecretConfigured ? "应用密钥已安全保存到本机" : "未保存";
     public string GatewayState { get => _gatewayState; private set => SetProperty(ref _gatewayState, value); }
     public string SessionIdShort { get => _sessionIdShort; private set => SetProperty(ref _sessionIdShort, value); }
     public string LastConnectedAt { get => _lastConnectedAt; private set => SetProperty(ref _lastConnectedAt, value); }
@@ -206,7 +206,7 @@ public sealed class QqChannelViewModel : ObservableObject
             await RunOnUiAsync(() =>
             {
                 SecretConfigured = result.SecretConfigured;
-                OperationMessage = "AppSecret 已使用 Windows DPAPI（当前用户）安全保存。";
+                OperationMessage = "应用密钥已安全保存到本机。";
             });
             return true;
         }
@@ -219,7 +219,7 @@ public sealed class QqChannelViewModel : ObservableObject
         {
             await _api.DeleteQqSecretAsync(cancellationToken).ConfigureAwait(false);
             await _secretService.DeleteAsync(cancellationToken).ConfigureAwait(false);
-            await RunOnUiAsync(() => { SecretConfigured = false; Configured = false; Running = false; Connected = false; OperationMessage = "QQ Bot AppSecret 已删除；Telegram Token 未改变。"; });
+            await RunOnUiAsync(() => { SecretConfigured = false; Configured = false; Running = false; Connected = false; OperationMessage = "QQ 应用密钥已删除。Telegram 设置未更改。"; });
         }
         catch (Exception exception) { await ReportErrorAsync("删除 AppSecret", exception); }
     }
@@ -230,7 +230,7 @@ public sealed class QqChannelViewModel : ObservableObject
         {
             await _api.DeleteBindingAsync(bindingId, cancellationToken).ConfigureAwait(false);
             await _refreshBindings(cancellationToken).ConfigureAwait(false);
-            await RunOnUiAsync(() => OperationMessage = "绑定已删除；Codex Thread 未删除。 ");
+            await RunOnUiAsync(() => OperationMessage = "关联会话已删除；Codex 会话未删除。");
         }
         catch (Exception exception) { await ReportErrorAsync("删除绑定", exception); }
     }
@@ -279,7 +279,9 @@ public sealed class QqChannelViewModel : ObservableObject
 	public void ReplaceBindings(IEnumerable<ChannelBinding>? bindings)
     {
         Bindings.Clear();
-		foreach (var binding in (bindings ?? []).OrderByDescending(item => item.CreatedAt, StringComparer.Ordinal)) Bindings.Add(binding);
+		foreach (var binding in (bindings ?? [])
+			.Where(item => !item.Legacy && string.Equals(item.ChannelType, "qqbot", StringComparison.OrdinalIgnoreCase))
+			.OrderByDescending(item => item.CreatedAt, StringComparer.Ordinal)) Bindings.Add(binding);
     }
 
 	public Task ClearBindingLoadErrorAsync() => RunOnUiAsync(() =>
@@ -290,10 +292,10 @@ public sealed class QqChannelViewModel : ObservableObject
 
 	public async Task ReportBindingLoadErrorAsync(Exception exception)
 	{
-		_logs.AddException("desktop", "Binding 列表加载失败。", exception);
+		_logs.AddException("desktop", "关联会话列表加载失败。", exception);
 		await RunOnUiAsync(() =>
 		{
-			_bindingLoadError = $"Binding 列表加载失败：{SafeExceptionMessage(exception)}";
+			_bindingLoadError = $"无法读取关联会话：{SafeExceptionMessage(exception)}";
 			NotifyAuxiliaryLoadError();
 		});
 	}
@@ -329,7 +331,7 @@ public sealed class QqChannelViewModel : ObservableObject
             await _api.ConfigureQqAsync(BuildRequest(), _lifetime.Token).ConfigureAwait(false);
             var result = await _api.TestQqAsync(_lifetime.Token).ConfigureAwait(false);
             await RunOnUiAsync(() => OperationMessage = result.Success
-                ? $"凭据有效：Gateway {result.GatewayHost}，Token 约 {Math.Max(0, result.TokenExpiresIn / 60)} 分钟后到期。"
+                ? "QQ 应用凭据有效。"
                 : DescribeCategory(result.Code, result.Message));
         }
         catch (Exception exception) { await ReportErrorAsync("测试 QQ Bot 凭据", exception); }
@@ -357,7 +359,7 @@ public sealed class QqChannelViewModel : ObservableObject
             await _settingsService.SaveAsync(_settings).ConfigureAwait(false);
             await _api.ConfigureQqAsync(BuildRequest(), _lifetime.Token).ConfigureAwait(false);
             var status = await _api.StartQqAsync(_lifetime.Token).ConfigureAwait(false);
-            await RunOnUiAsync(() => { ApplyStatus(status); OperationMessage = "QQ 官方机器人已启动并完成 READY。"; });
+            await RunOnUiAsync(() => { ApplyStatus(status); OperationMessage = "QQ 机器人已启动并连接。"; });
         }
         catch (Exception exception) { await ReportErrorAsync("启动 QQ 官方机器人", exception); }
     }
@@ -424,12 +426,12 @@ public sealed class QqChannelViewModel : ObservableObject
         Running = status.Running;
         Connected = status.Connected;
         SecretConfigured = status.SecretConfigured;
-        GatewayState = Empty(status.GatewayState);
+        GatewayState = UiText.Status(status.GatewayState);
         SessionIdShort = Empty(status.SessionIdShort);
-        LastConnectedAt = Empty(status.LastConnectedAt);
-        LastHeartbeatAt = Empty(status.LastHeartbeatAt);
-        LastDispatchAt = Empty(status.LastDispatchAt);
-        AccessTokenExpiresAt = Empty(status.AccessTokenExpiresAt);
+        LastConnectedAt = UiText.LocalDateTime(status.LastConnectedAt);
+        LastHeartbeatAt = UiText.LocalDateTime(status.LastHeartbeatAt);
+        LastDispatchAt = UiText.LocalDateTime(status.LastDispatchAt);
+        AccessTokenExpiresAt = UiText.LocalDateTime(status.AccessTokenExpiresAt);
         ReconnectCount = status.ReconnectCount;
         AllowedUserCount = status.AllowedUserCount;
         AllowedGroupCount = status.AllowedGroupCount;
@@ -465,7 +467,7 @@ public sealed class QqChannelViewModel : ObservableObject
 			_logs.AddException("desktop", "最近发现身份加载失败。", exception);
 			await RunOnUiAsync(() =>
 			{
-				_discoveredLoadError = $"最近发现身份加载失败：{SafeExceptionMessage(exception)}";
+			_discoveredLoadError = $"无法读取最近发现的 QQ 账号：{SafeExceptionMessage(exception)}";
 				NotifyAuxiliaryLoadError();
 			});
 		}
@@ -479,51 +481,46 @@ public sealed class QqChannelViewModel : ObservableObject
 
 	private Task SetOperationErrorAsync(string action, Exception exception) => RunOnUiAsync(() =>
     {
-		OperationMessage = $"{action}失败：{SafeExceptionMessage(exception)}";
+		OperationMessage = UiText.UserError(exception, action);
     });
 
 	private static string SafeExceptionMessage(Exception exception) =>
-		exception is BridgeApiException api ? DescribeCategory(api.Code, api.Message) : LogService.Redact(exception.Message);
+		exception is BridgeApiException api ? DescribeCategory(api.Code, api.Message) : UiText.UserError(exception);
 
     private static string DescribeCategory(string? code, string? fallback) => code?.Trim().ToLowerInvariant().Replace('-', '_') switch
     {
         "credentials_missing" or "qqbot_credentials_missing" => "缺少 AppID 或 AppSecret，请先保存凭据。",
         "appid_invalid" or "qqbot_appid_invalid" => "AppID 无效，请复制 QQ 开放平台显示的 AppID。",
         "secret_invalid" or "qqbot_secret_invalid" => "AppSecret 无效，请重新复制或生成。",
-        "auth_failed" or "qqbot_auth_failed" => "认证失败，请检查 AppID、AppSecret 和机器人状态。",
-		"token_expired" => "Access Token 已失效，daemon 将受控刷新；若持续出现请重新测试凭据。",
-		"token_refresh_failed" => "Access Token 刷新失败，请检查凭据、网络和代理。",
-		"gateway_lookup_failed" or "qqbot_gateway_failed" => PreferFallback(fallback, "无法获取 QQ Gateway，请检查机器人状态、权限和网络。"),
-		"gateway_auth_failed" => PreferFallback(fallback, "QQ Gateway 请求返回 401：认证失败。"),
-		"gateway_permission_denied" => PreferFallback(fallback, "QQ Gateway 请求返回 403：机器人权限或状态不允许。"),
-		"gateway_endpoint_not_found" => PreferFallback(fallback, "QQ Gateway 请求返回 404：Gateway API 路径与当前协议不兼容。"),
-		"gateway_response_invalid" => PreferFallback(fallback, "Gateway 返回格式无法解析。"),
-		"gateway_connect_failed" => "无法连接 QQ Gateway，请检查网络或代理。",
-		"gateway_identify_failed" => "QQ Gateway Identify/READY 失败，请检查凭据和消息权限。",
-		"gateway_closed" => "QQ Gateway 已断开；启用自动重连时会继续恢复。",
-		"gateway_session_invalid" => "QQ Gateway Session 已失效，将建立新 Session。",
+        "auth_failed" or "qqbot_auth_failed" => "无法连接 QQ 机器人，请检查 AppID、AppSecret（应用密钥）和机器人状态。",
+		"token_expired" or "token_refresh_failed" => "QQ 登录凭据已失效，请重新测试应用凭据。",
+		"gateway_lookup_failed" or "qqbot_gateway_failed" => "无法连接 QQ 机器人，请检查机器人状态、权限和网络。",
+		"gateway_auth_failed" => "QQ 应用凭据无效，请重新检查。",
+		"gateway_permission_denied" => "QQ 机器人权限不足，请检查开放平台中的消息权限。",
+		"gateway_endpoint_not_found" or "gateway_response_invalid" => "当前版本与 QQ 服务不兼容，请查看运行日志并升级软件。",
+		"gateway_connect_failed" => "无法连接 QQ 机器人，请检查网络或代理。",
+		"gateway_identify_failed" => "QQ 机器人连接失败，请检查凭据和消息权限。",
+		"gateway_closed" => "QQ 连接已断开；开启自动重连后会继续尝试恢复。",
+		"gateway_session_invalid" => "QQ 连接已失效，正在重新连接。",
         "intent_not_enabled" or "permission_not_granted" => "当前机器人应用尚未获得群聊/C2C 消息权限，请在 QQ 开放平台启用。",
         "rate_limited" or "qqbot_rate_limited" => "QQ 平台已限流，请稍后重试。",
-        "network_timeout" or "qqbot_token_timeout" => PreferFallback(fallback, "请求超时，请检查网络或代理。"),
-		"dns_failed" => PreferFallback(fallback, "无法解析 api.sgroup.qq.com，请检查 DNS。"),
-		"tls_failed" => PreferFallback(fallback, "QQ Gateway TLS 校验失败，请检查证书、系统时间或代理。"),
-		"network_error" or "qqbot_network_error" => PreferFallback(fallback, "无法连接 api.sgroup.qq.com，请检查网络或代理。"),
-        "proxy_failed" or "qqbot_proxy_failed" => PreferFallback(fallback, "代理连接失败，请检查代理地址。"),
-		"message_send_failed" => "QQ 消息发送失败，请检查 OpenID、消息窗口和平台状态。",
+        "network_timeout" or "qqbot_token_timeout" => "请求超时，请检查网络或代理。",
+		"dns_failed" => "无法连接 QQ 服务，请检查网络设置。",
+		"tls_failed" => "安全连接失败，请检查系统时间、网络或代理。",
+		"network_error" or "qqbot_network_error" => "无法连接 QQ 服务，请检查网络或代理。",
+        "proxy_failed" or "qqbot_proxy_failed" => "代理连接失败，请检查代理地址。",
+		"message_send_failed" => "QQ 消息发送失败，请检查目标标识、消息窗口和平台状态。",
 		"message_window_expired" => "原消息回复窗口已过期，请在 QQ 中重新发送一条消息。",
-		"invalid_openid" => "OpenID 无效或已失效，请从最近事件重新添加。",
+		"invalid_openid" => "用户或群聊标识无效，请从最近发现的 QQ 账号重新添加。",
         "protocol_incompatible" or "qqbot_protocol_error" => "QQ 官方协议响应不兼容，请查看日志并升级。",
-        _ => string.IsNullOrWhiteSpace(fallback) ? "QQ 官方机器人操作失败。" : LogService.Redact(fallback)
+        _ => "QQ 机器人操作失败，请重试。详情已写入运行日志。"
     };
-
-    private static string PreferFallback(string? fallback, string defaultMessage) =>
-        string.IsNullOrWhiteSpace(fallback) ? defaultMessage : LogService.Redact(fallback);
 
     private static (string Message, string Type) DescribeLoadError(Exception exception)
     {
-        if (exception is QqSecretException) return ("无法读取已保存的 AppSecret；文件可能损坏或属于其他 Windows 用户。", "DPAPI");
-		if (exception is BridgeApiException api && api.StatusCode == HttpStatusCode.NotFound) return ("QQ Official Bot API 不可用，请确认后端版本为 0.7.0。", "HTTP");
-        return ($"加载 QQ 官方机器人失败：{LogService.Redact(exception.Message)}", exception.GetType().Name);
+        if (exception is QqSecretException) return ("无法读取已保存的应用密钥；你可以删除后重新保存。", "DPAPI");
+		if (exception is BridgeApiException api && api.StatusCode == HttpStatusCode.NotFound) return ("当前软件版本不支持 QQ 机器人，请升级后重试。", "HTTP");
+		return (UiText.UserError(exception, "读取 QQ 机器人设置"), exception.GetType().Name);
     }
 
 	private static List<string> ParseLines(string? value) => (value ?? "")

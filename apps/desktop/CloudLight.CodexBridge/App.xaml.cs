@@ -112,6 +112,8 @@ public partial class App : Application
         }
         var dark = theme == "dark";
         IsDarkTheme = dark;
+        SetBrush("AccentBrush", dark ? "#60A5FA" : "#2563EB");
+        SetBrush("AccentHoverBrush", dark ? "#93C5FD" : "#1D4ED8");
         SetBrush("BackgroundBrush", dark ? "#11151C" : "#F5F7FB");
         SetBrush("WindowBrush", dark ? "#11151C" : "#F5F7FB");
         SetBrush("SurfaceBrush", dark ? "#1B2029" : "#FFFFFF");
@@ -122,15 +124,30 @@ public partial class App : Application
         SetBrush("TextBrush", dark ? "#EEF2F8" : "#172033");
         SetBrush("SecondaryTextBrush", dark ? "#A8B1C0" : "#667085");
         SetBrush("MutedBrush", dark ? "#A8B1C0" : "#667085");
+        SetBrush("DisabledTextBrush", dark ? "#6F7A8B" : "#98A2B3");
         SetBrush("SubtleAccentBrush", dark ? "#20345C" : "#EAF1FF");
         SetBrush("CodeBrush", dark ? "#121720" : "#F3F5F8");
         SetBrush("ScrollTrackBrush", dark ? "#171C24" : "#EEF1F5");
         SetBrush("ScrollThumbBrush", dark ? "#4A5566" : "#AAB4C2");
         SetBrush("WarningSurfaceBrush", dark ? "#352A18" : "#FFF4D6");
+        SetBrush("SelectionBrush", dark ? "#375A97" : "#7EA7F8");
+        SetBrush("SuccessBrush", dark ? "#32D583" : "#16835B");
+        SetBrush("WarningBrush", dark ? "#FDB022" : "#A15C00");
+        SetBrush("ErrorBrush", dark ? "#F97066" : "#B42318");
         if (Current.MainWindow is MainWindow mainWindow) mainWindow.ApplyTitleBarTheme(dark);
     }
 
-    private static void SetBrush(string key, string color) => Current.Resources[key] = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(color));
+    private static void SetBrush(string key, string color)
+    {
+        var parsedColor = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(color);
+        if (Current.Resources[key] is SolidColorBrush brush && !brush.IsFrozen)
+        {
+            brush.Color = parsedColor;
+            return;
+        }
+
+        Current.Resources[key] = new SolidColorBrush(parsedColor);
+    }
 
     private void CreateTrayIcon()
     {

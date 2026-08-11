@@ -28,7 +28,7 @@ public sealed class SettingsViewModel : ObservableObject
 	private bool _mirrorAssistant = true, _mirrorInput = true, _mirrorError = true;
 	private bool _requireThreadNumber = true;
 	private string _mirrorStatusText = "等待读取";
-	private string _qqCapabilityNotice = "QQ 官方机器人主动消息受平台权限、回复窗口和额度限制。";
+	private string _qqCapabilityNotice = "QQ 主动消息受平台权限、回复窗口和发送额度限制。";
     private bool _startWithWindows, _silentStartup, _closeToTray, _restoreLastPage, _autoRefreshThreads, _mirrorAutoStart;
     private int _threadRefreshIntervalSeconds;
     private string _theme;
@@ -117,8 +117,15 @@ public sealed class SettingsViewModel : ObservableObject
     public string ApprovalPolicy
     {
         get => _approvalPolicy;
-        private set => SetProperty(ref _approvalPolicy, value);
+        private set { if (SetProperty(ref _approvalPolicy, value)) OnPropertyChanged(nameof(ApprovalPolicyDisplay)); }
     }
+    public string ApprovalPolicyDisplay => ApprovalPolicy switch
+    {
+        "on-request" => "需要时询问",
+        "never" => "不询问",
+        "untrusted" => "仅确认受限操作",
+        _ => "使用当前设置"
+    };
 
     public string SaveResult
     {
@@ -142,7 +149,7 @@ public sealed class SettingsViewModel : ObservableObject
 	public async Task RefreshMirrorAsync()
 	{
 		try { ApplyMirrorStatus(await _api.GetMirrorAsync()); }
-		catch (Exception exception) { MirrorStatusText = $"读取失败：{exception.Message}"; }
+		catch (Exception exception) { MirrorStatusText = UiText.UserError(exception, "读取同步状态"); }
 	}
 
 	private void ApplyMirrorStatus(MirrorStatus status)
@@ -151,16 +158,25 @@ public sealed class SettingsViewModel : ObservableObject
 		TelegramMirrorEnabled=status.Config.Telegram.Enabled;TelegramMirrorChatId=status.Config.Telegram.ChatId;
 		QqMirrorEnabled=status.Config.Qq.Enabled;QqMirrorConversationType=status.Config.Qq.ConversationType;QqMirrorOpenId=status.Config.Qq.OpenId;
 		MirrorAssistant=status.Config.Messages.Assistant;MirrorInput=status.Config.Messages.RequestUserInput;MirrorError=status.Config.Messages.Error;
-		MirrorStatusText=$"Telegram: {status.TelegramState}；QQ: {FormatQqMirrorState(status.QqState)}" + (string.IsNullOrWhiteSpace(status.LastQqError) ? "" : $"；真实原因：{status.LastQqError}");QqCapabilityNotice=status.QqCapabilityNotice;
+		MirrorStatusText=$"Telegram：{FormatMirrorState(status.TelegramState)}；QQ：{FormatQqMirrorState(status.QqState)}" + (string.IsNullOrWhiteSpace(status.LastQqError) ? "" : $"；{UiText.UserError(status.LastQqError, "QQ 同步")}");
+		QqCapabilityNotice="QQ 主动消息受平台权限、回复窗口和发送额度限制。";
 	}
+
+	private static string FormatMirrorState(string state) => state switch
+	{
+		"ready" or "running" or "enabled" => "已启用",
+		"disabled" or "stopped" => "未启用",
+		"failed" => "失败",
+		_ => UiText.Status(state)
+	};
 
 	private static string FormatQqMirrorState(string state) => state switch
 	{
-		"platform-capability-limited" => "平台能力受限（platform-capability-limited）",
-		"target-invalid" => "目标 OpenID 无效",
+		"platform-capability-limited" => "平台能力受限",
+		"target-invalid" => "同步目标无效",
 		"platform-rejected" => "平台拒绝",
 		"ready-limited" => "已就绪（主动消息受平台限制）",
-		_ => state
+		_ => FormatMirrorState(state)
 	};
 
     public void UpdateRuntimeStatus(BridgeStatus status, string backendStatus)
@@ -170,7 +186,7 @@ public sealed class SettingsViewModel : ObservableObject
             ? string.IsNullOrWhiteSpace(status.CodexCliVersion)
                 ? status.CodexCliPath
                 : $"{status.CodexCliPath} ({status.CodexCliVersion})"
-            : $"未找到：{status.LastError}";
+            : "未找到 Codex。请确认已安装，或手动选择程序路径。";
         SandboxMode = status.SandboxMode;
         ApprovalPolicy = status.ApprovalPolicy;
     }
@@ -196,11 +212,12 @@ public sealed class SettingsViewModel : ObservableObject
 			ApplyMirrorStatus(mirror);
             var status = await _api.UpdateSecurityAsync(_settings.SandboxMode);
             ApprovalPolicy = status.ApprovalPolicy;
-            SaveResult = "已保存；沙盒设置会应用到后续新 Turn。Codex CLI 路径在下次启动时生效。";
+            SaveResult = "设置已保存。文件访问范围会应用到后续新任务，Codex 程序路径将在下次启动时生效。";
         }
         catch (Exception exception)
         {
-            SaveResult = $"设置已保存到用户目录；后端暂不可用，将在下次启动生效：{exception.Message}";
+            SaveResult = "设置已保存，本地服务暂不可用；更改将在下次启动时生效。";
+            _logs.AddException("desktop", "应用设置时本地服务不可用。", exception);
         }
         _logs.Add("desktop", "用户设置已保存（未记录凭据或消息正文）。");
     }

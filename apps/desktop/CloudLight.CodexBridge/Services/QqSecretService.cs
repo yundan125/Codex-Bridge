@@ -1,6 +1,6 @@
 namespace CloudLight.CodexBridge.Services;
 
-/// <summary>Stores the QQ Official Bot AppSecret independently from Telegram and legacy OneBot.</summary>
+/// <summary>Stores the QQ Official Bot AppSecret independently from Telegram.</summary>
 public sealed class QqSecretService
 {
     private readonly DpapiSecretStore _store = new(

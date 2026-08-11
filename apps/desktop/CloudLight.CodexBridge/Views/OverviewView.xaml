@@ -8,13 +8,13 @@
                     <StackPanel><TextBlock Text="Codex" Style="{StaticResource EyebrowTextStyle}"/><TextBlock Text="{Binding CodexState}" Style="{StaticResource MetricValueStyle}"/><TextBlock Text="{Binding SessionCount}" Style="{StaticResource SecondaryTextStyle}"/></StackPanel>
                 </Border>
                 <Border Style="{StaticResource MetricCardStyle}" Margin="0,0,12,0">
-                    <StackPanel><TextBlock Text="QQ 官方机器人" Style="{StaticResource EyebrowTextStyle}"/><TextBlock Text="{Binding QqState}" Style="{StaticResource MetricValueStyle}"/><TextBlock Text="远程 #N 路由" Style="{StaticResource SecondaryTextStyle}"/></StackPanel>
+                    <StackPanel><TextBlock Text="QQ 机器人" Style="{StaticResource EyebrowTextStyle}"/><TextBlock Text="{Binding QqState}" Style="{StaticResource MetricValueStyle}"/><TextBlock Text="按聊天编号发送" Style="{StaticResource SecondaryTextStyle}"/></StackPanel>
                 </Border>
                 <Border Style="{StaticResource MetricCardStyle}" Margin="0,0,12,0">
-                    <StackPanel><TextBlock Text="Telegram" Style="{StaticResource EyebrowTextStyle}"/><TextBlock Text="{Binding TelegramState}" Style="{StaticResource MetricValueStyle}"/><TextBlock Text="Bot 与 Binding" Style="{StaticResource SecondaryTextStyle}"/></StackPanel>
+                    <StackPanel><TextBlock Text="Telegram" Style="{StaticResource EyebrowTextStyle}"/><TextBlock Text="{Binding TelegramState}" Style="{StaticResource MetricValueStyle}"/><TextBlock Text="机器人与关联会话" Style="{StaticResource SecondaryTextStyle}"/></StackPanel>
                 </Border>
                 <Border Style="{StaticResource MetricCardStyle}">
-                    <StackPanel><TextBlock Text="消息同步" Style="{StaticResource EyebrowTextStyle}"/><TextBlock Text="{Binding MirrorState}" Style="{StaticResource MetricValueStyle}"/><TextBlock Text="每个 Turn 最多一个 Final" Style="{StaticResource SecondaryTextStyle}"/></StackPanel>
+                    <StackPanel><TextBlock Text="消息同步" Style="{StaticResource EyebrowTextStyle}"/><TextBlock Text="{Binding MirrorState}" Style="{StaticResource MetricValueStyle}"/><TextBlock Text="每次任务只发送最终回答" Style="{StaticResource SecondaryTextStyle}"/></StackPanel>
                 </Border>
             </UniformGrid>
             <Grid>
@@ -22,10 +22,10 @@
                 <Border Style="{StaticResource CardStyle}">
                     <StackPanel>
                         <TextBlock Text="当前工作区" Style="{StaticResource SectionTitleStyle}"/>
-                        <TextBlock Text="当前 Thread" Style="{StaticResource EyebrowTextStyle}" Margin="0,18,0,4"/>
+                        <TextBlock Text="当前会话" Style="{StaticResource EyebrowTextStyle}" Margin="0,18,0,4"/>
                         <TextBox Text="{Binding CurrentThread, Mode=OneWay}" Style="{StaticResource ReadOnlyTextStyle}"/>
                         <Separator Margin="0,16"/>
-                        <TextBlock Text="Running Turn" Style="{StaticResource EyebrowTextStyle}"/>
+                        <TextBlock Text="当前任务" Style="{StaticResource EyebrowTextStyle}"/>
                         <TextBlock Text="{Binding RunningTurn}" FontSize="18" Margin="0,6,0,0"/>
                     </StackPanel>
                 </Border>

@@ -24,7 +24,7 @@ public sealed partial class LogService
 
     public void AddException(string source, string context, Exception exception)
     {
-        var safe = Redact($"{context}{Environment.NewLine}{exception.GetType().FullName}: {exception.Message}{Environment.NewLine}{exception.StackTrace}");
+        var safe = Redact($"{context}{Environment.NewLine}{exception}");
         // Fatal handlers may terminate the process immediately, so persist these synchronously.
         AppendToDesktopLog(source, safe);
         AddToView(source, safe);

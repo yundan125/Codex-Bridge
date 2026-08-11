@@ -308,7 +308,7 @@ public sealed class ChannelsViewModel : ObservableObject
             }
             await _settingsService.SaveAsync(_settings);
             ApplyStatus(status);
-            OperationMessage = "Token 已使用当前 Windows 用户的 DPAPI 安全保存，输入框已清空。";
+            OperationMessage = "Telegram 机器人密钥已安全保存到本机，输入框已清空。";
             _logs.Add("desktop", "Telegram Token 已安全保存并应用（未记录凭据）。");
             return true;
         }
@@ -353,11 +353,11 @@ public sealed class ChannelsViewModel : ObservableObject
             var existing = Bindings.FirstOrDefault(binding => binding.Id == bindingId);
             if (existing is not null) Bindings.Remove(existing);
             BindingCount = Bindings.Count;
-            OperationMessage = "绑定已删除。";
+            OperationMessage = "关联会话已删除。";
         }
         catch (Exception exception)
         {
-            ReportError("删除绑定", exception);
+            ReportError("删除关联会话", exception);
         }
     }
 
@@ -523,11 +523,8 @@ public sealed class ChannelsViewModel : ObservableObject
                 return;
             }
 
-            var category = DescribeProxyCategory(result.Category);
-            var status = result.StatusCode > 0 ? $"，HTTP {result.StatusCode}" : "";
-            var detail = string.IsNullOrWhiteSpace(result.Message) ? "请检查代理地址和网络环境。" : LogService.Redact(result.Message);
-            OperationMessage = $"代理测试失败：{category}{status}，耗时 {duration}。{detail}";
-            _logs.Add("desktop", OperationMessage);
+            OperationMessage = UiText.UserError(result.Message, "测试代理");
+            _logs.Add("desktop", $"Telegram 代理测试失败：{result.Category} {result.Message}".Trim());
         }
         catch (Exception exception)
         {
@@ -549,7 +546,7 @@ public sealed class ChannelsViewModel : ObservableObject
             await _settingsService.SaveAsync(_settings);
             ApplyStatus(await _api.ConfigureTelegramAsync(BuildRequest(token), _lifetime.Token));
             ApplyStatus(await _api.StartTelegramAsync(_lifetime.Token));
-            OperationMessage = "Telegram 适配器已启动。";
+            OperationMessage = "Telegram 已启动。";
         }
         catch (Exception exception)
         {
@@ -562,7 +559,7 @@ public sealed class ChannelsViewModel : ObservableObject
         try
         {
             ApplyStatus(await _api.StopTelegramAsync(_lifetime.Token));
-            OperationMessage = "Telegram 适配器已停止。";
+            OperationMessage = "Telegram 已停止。";
         }
         catch (Exception exception)
         {
@@ -585,7 +582,7 @@ public sealed class ChannelsViewModel : ObservableObject
     {
         if (PollingTimeout is < 10 or > 60)
         {
-            OperationMessage = "Polling timeout 必须在 10 到 60 秒之间。";
+            OperationMessage = "消息接收等待时间必须在 10 到 60 秒之间。";
             return false;
         }
 
@@ -599,7 +596,7 @@ public sealed class ChannelsViewModel : ObservableObject
             if (value.Any(character => character is < '0' or > '9') ||
                 !long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed) || parsed <= 0)
             {
-                OperationMessage = $"允许用户 ID 第 {index + 1} 行无效：每行必须是正十进制 Int64。";
+                OperationMessage = $"允许用户 ID 的第 {index + 1} 行无效：请输入正整数。";
                 return false;
             }
             if (seen.Add(parsed)) values.Add(parsed);
@@ -658,10 +655,10 @@ public sealed class ChannelsViewModel : ObservableObject
             : !string.IsNullOrWhiteSpace(status.TokenFingerprint)
                 ? $"已安全配置 · {status.TokenFingerprint}"
                 : Configured ? "已安全配置" : "未保存";
-        PollingState = EmptyAsDash(string.IsNullOrWhiteSpace(status.PollingState) ? status.State : status.PollingState);
-        LastUpdateAt = EmptyAsDash(status.LastUpdateAt);
-        LastError = status.LastError ?? "";
-        StartedAt = EmptyAsDash(status.StartedAt);
+        PollingState = UiText.Status(string.IsNullOrWhiteSpace(status.PollingState) ? status.State : status.PollingState);
+        LastUpdateAt = UiText.LocalDateTime(status.LastUpdateAt);
+        LastError = string.IsNullOrWhiteSpace(status.LastError) ? "" : UiText.UserError(status.LastError, "Telegram");
+        StartedAt = UiText.LocalDateTime(status.StartedAt);
         ConfiguredProxyMode = FormatProxyMode(status.ProxyMode);
         MaskedProxyAddress = EmptyAsDash(status.MaskedProxyAddress);
         EffectiveProxyMode = FormatProxyMode(status.EffectiveProxyMode);
@@ -794,9 +791,8 @@ public sealed class ChannelsViewModel : ObservableObject
 
     private void ReportError(string action, Exception exception)
     {
-        var message = LogService.Redact(exception.Message);
-        OperationMessage = $"{action}失败：{message}";
-        _logs.Add("desktop", OperationMessage);
+        OperationMessage = UiText.UserError(exception, action);
+        _logs.Add("desktop", $"{action}失败：{LogService.Redact(exception.Message)}");
     }
 
     private async Task OpenLogsAsync()
@@ -837,24 +833,24 @@ public sealed class ChannelsViewModel : ObservableObject
     private static (string Message, string Type) DescribeLoadError(Exception exception)
     {
         if (exception is TelegramSecretException)
-            return ("无法读取已保存的 Token。文件可能已损坏或属于其他 Windows 用户。", "DPAPI");
+            return ("无法读取已保存的 Telegram 机器人密钥。你可以删除后重新保存。", "DPAPI");
         if (exception is BridgeApiException apiException)
         {
             var label = apiException.StatusCode switch
             {
-                HttpStatusCode.Unauthorized => "后端拒绝访问（401）",
-                HttpStatusCode.NotFound => "远程渠道接口不可用（404）",
-                HttpStatusCode.Conflict => "远程渠道状态冲突（409）",
-                HttpStatusCode.InternalServerError => "后端处理失败（500）",
-                _ => $"后端请求失败（{(int)apiException.StatusCode}）"
+                HttpStatusCode.Unauthorized => "本地服务连接已失效",
+                HttpStatusCode.NotFound => "当前版本不支持此设置",
+                HttpStatusCode.Conflict => "当前状态暂时无法执行此操作",
+                HttpStatusCode.InternalServerError => "本地服务未能完成处理",
+                _ => "本地服务请求失败"
             };
-            return ($"{label}：{LogService.Redact(apiException.Message)}", "HTTP");
+            return ($"{label}，请重试。详情已写入运行日志。", "HTTP");
         }
         if (exception is TaskCanceledException or TimeoutException)
-            return ("读取远程渠道配置超时，请确认本地后端已经就绪后重试。", "Timeout");
+            return ("读取远程渠道设置超时，请稍后重试。", "Timeout");
         if (exception is InvalidOperationException)
-            return ("本地后端尚未就绪，请稍后重试。", "Backend");
-        return ($"读取远程渠道配置失败：{LogService.Redact(exception.Message)}", exception.GetType().Name);
+            return ("本地服务尚未就绪，请稍后重试。", "Backend");
+        return (UiText.UserError(exception, "读取远程渠道设置"), exception.GetType().Name);
     }
 
     private static Task RunOnUiAsync(Action action)

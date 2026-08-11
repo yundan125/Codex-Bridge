@@ -192,7 +192,7 @@ public sealed class SessionsViewModel : ObservableObject
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            ErrorText = exception.Message;
+            ErrorText = UiText.UserError(exception, "读取会话");
             SetViewState("error");
             _logs.Add("desktop", $"读取会话列表失败：{exception.Message}");
         }
@@ -230,7 +230,7 @@ public sealed class SessionsViewModel : ObservableObject
                     Origin = PayloadText(bridgeEvent.Payload, "source", "local"), CanSend = false,
                     CanInterrupt = PayloadText(bridgeEvent.Payload, "source", "local") == "local"
                 });
-                AddOrUpdateTimeline(bridgeEvent, "status", "Turn 已开始", "正在运行", false);
+                AddOrUpdateTimeline(bridgeEvent, "status", "任务已开始", "正在运行", false);
                 break;
             case "assistant.delta":
                 AppendAssistantDelta(bridgeEvent, PayloadText(bridgeEvent.Payload, "delta"));
@@ -264,7 +264,7 @@ public sealed class SessionsViewModel : ObservableObject
                 }
                 break;
             case "turn.interrupted":
-                AddOrUpdateTimeline(bridgeEvent, "status", "Turn 已停止", "中止请求已生效", false, "已停止");
+                AddOrUpdateTimeline(bridgeEvent, "status", "任务已停止", "停止请求已生效", false, "已停止");
                 ScheduleRecalibration();
                 break;
             case "turn.completed":
@@ -275,15 +275,15 @@ public sealed class SessionsViewModel : ObservableObject
                 break;
             case "turn.failed":
             {
-                AddOrUpdateTimeline(bridgeEvent, "error", "Turn 失败", PayloadText(bridgeEvent.Payload, "error", "Codex 任务失败"), false, "失败");
+                AddOrUpdateTimeline(bridgeEvent, "error", "任务失败", UiText.UserError(PayloadText(bridgeEvent.Payload, "error", "Codex 任务失败"), "任务"), false, "失败");
                 var failurePersistenceStatus = PayloadTextInObject(bridgeEvent.Payload, "verification", "status");
 				if (string.IsNullOrWhiteSpace(failurePersistenceStatus))
 					failurePersistenceStatus = PayloadText(bridgeEvent.Payload, "status", "failed");
                 HandlePersistenceStatus(bridgeEvent, failurePersistenceStatus);
                 var failureLabel = failurePersistenceStatus switch
                 {
-                    "persistence-failed" => "持久化失败",
-                    "thread-mismatch" => "线程不一致：未确认写入",
+                    "persistence-failed" => "保存状态检查失败",
+                    "thread-mismatch" => "会话不一致：未确认写入",
                     _ => "发送失败"
                 };
                 MarkTemporaryTurn(bridgeEvent.TurnId, failureLabel, true);
@@ -310,7 +310,7 @@ public sealed class SessionsViewModel : ObservableObject
                 if (PayloadText(bridgeEvent.Payload, "source") == "poll") ScheduleRecalibration();
                 break;
             case "error":
-                ActionError = PayloadText(bridgeEvent.Payload, "message", "Codex 操作失败");
+                ActionError = UiText.UserError(PayloadText(bridgeEvent.Payload, "message", "Codex 操作失败"));
                 break;
         }
         // Completion messages are not persistence evidence.  Only an explicit
@@ -362,7 +362,7 @@ public sealed class SessionsViewModel : ObservableObject
         catch (Exception exception)
         {
             if (!IsCurrentSelection(threadId, version)) return;
-            ErrorText = exception.Message;
+            ErrorText = UiText.UserError(exception, "读取会话");
             SetViewState("error");
             _logs.Add("desktop", $"读取 Thread 详情失败：{exception.Message}");
         }
@@ -401,12 +401,12 @@ public sealed class SessionsViewModel : ObservableObject
             }
             else if (result.Status is "persistence-failed" or "thread-mismatch" or "failed")
             {
-                MarkTemporaryTurn(result.ExpectedTurnId, result.Status == "thread-mismatch" ? "线程不一致：未确认写入" : "持久化失败", true);
+                MarkTemporaryTurn(result.ExpectedTurnId, result.Status == "thread-mismatch" ? "会话不一致：未确认写入" : "保存状态检查失败", true);
             }
         }
         catch (Exception exception)
         {
-            ActionError = $"重新验证当前 Thread 持久化失败：{exception.Message}";
+            ActionError = UiText.UserError(exception, "重新检查会话");
             SetPersistenceVerificationText(ActionError);
             _logs.Add("desktop", $"重新验证当前 Thread 持久化失败：{exception.Message}");
         }
@@ -419,44 +419,14 @@ public sealed class SessionsViewModel : ObservableObject
         OnPropertyChanged(nameof(PersistenceVerificationVisibility));
     }
 
-    private static string FormatPersistenceVerification(PersistenceVerification result)
+    private static string FormatPersistenceVerification(PersistenceVerification result) => result.Status switch
     {
-        static string Snapshot(string label, ThreadPersistenceSnapshot? snapshot) => snapshot is null
-            ? $"{label}：无结果"
-            : $"{label}：Thread={snapshot.ThreadId}，Turn 数={snapshot.TurnCount}，最后 Turn={snapshot.LastTurnId}，目标 Turn={(snapshot.FoundTurn ? "已找到" : "未找到")}，目标状态={snapshot.TurnStatus}，rollout={snapshot.RolloutPath}";
-
-        var lines = new List<string>
-        {
-            $"持久化验证：{result.Status}",
-            result.Message,
-            Snapshot("主 App Server", result.Main),
-            Snapshot("独立 App Server", result.Probe)
-        };
-		if (result.Status == "persisted")
-			lines.Add("该 Turn 已写入 Codex 本地会话；这不代表 Codex Desktop 当前窗口会实时刷新其他 App Server 写入的内容。");
-        if (result.Rollout is not null)
-        {
-            lines.Add($"rollout：{result.Rollout.Path}；存在={result.Rollout.Exists}；已增长={result.Rollout.LengthIncreased}；发送后已修改={result.Rollout.ModifiedAfterSend}；包含标识={result.Rollout.ContainsIdentifier}");
-            if (!string.IsNullOrWhiteSpace(result.Rollout.Error)) lines.Add($"rollout 错误：{result.Rollout.Error}");
-        }
-        if (result.Warnings.Count > 0) lines.Add($"警告：{string.Join("；", result.Warnings)}");
-        if (result.Environment is not null)
-        {
-            var environment = result.Environment;
-            lines.Add($"Codex CLI：{environment.CodexCliPath} ({environment.CodexCliVersion})");
-            lines.Add($"运行用户：{environment.Username}；USERPROFILE={environment.UserProfile}；HOME={environment.Home}");
-            lines.Add($"CODEX_HOME 显式设置={environment.CodexHomeExplicit}；解析数据根={environment.ResolvedCodexDataRoot}");
-            lines.Add($"App Server 工作目录：{environment.AppServerWorkingDirectory}");
-            if (environment.Processes.Count > 0)
-				lines.Add($"Codex 进程：{string.Join("；", environment.Processes.Select(process => $"{process.Name} PID={process.Pid} user={process.Username} version={process.Version} path={process.ExecutablePath} cmd={process.CommandLine}"))}");
-            lines.Add(environment.DesktopEnvironmentKnown
-                ? "已读取 Codex Desktop 环境，可比较数据目录。"
-                : "无法读取 Codex Desktop 进程环境变量；不推测其 CODEX_HOME，请运行只读 PowerShell 诊断脚本核对。");
-            if (environment.MultipleMatchingRollouts)
-                lines.Add($"警告：同一 Thread ID 匹配到多个 rollout 文件：{string.Join("；", environment.MatchingRolloutPaths)}");
-        }
-        return string.Join(Environment.NewLine, lines.Where(line => !string.IsNullOrWhiteSpace(line)));
-    }
+        "persisted" => "会话保存状态正常。",
+        "completed-unverified" => "任务已经完成，正在等待确认保存状态。",
+        "thread-mismatch" => "检查到会话不一致，本次结果不会显示为当前会话的成功内容。",
+        "persistence-failed" or "failed" => "无法确认会话是否已保存，请稍后重新检查。",
+        _ => "会话检查已完成。"
+    };
 
     private async Task SendAsync()
     {
@@ -475,9 +445,9 @@ public sealed class SessionsViewModel : ObservableObject
                 {
                     Key = $"pending-user-{Guid.NewGuid():N}", TurnId = accepted.TurnId,
                     Kind = "user", Title = "用户", Text = text,
-                    Status = "线程不一致：未确认写入", IsTemporary = true, IsFailure = true
+                    Status = "会话不一致：未确认写入", IsTemporary = true, IsFailure = true
                 });
-                ActionError = "thread/start 返回了不同的 Thread ID；不会把该回复显示为当前 Thread 的成功结果。";
+                ActionError = "收到的结果不属于当前会话，因此没有显示为成功内容。详情已写入运行日志。";
                 SetRuntime(new ThreadRuntime { ThreadId = selectedThreadId, TurnId = accepted.TurnId, State = "thread-mismatch", CanSend = false });
                 return;
             }
@@ -499,7 +469,7 @@ public sealed class SessionsViewModel : ObservableObject
         }
         catch (Exception exception)
         {
-            ActionError = exception.Message;
+            ActionError = UiText.UserError(exception, "发送消息");
             _logs.Add("desktop", $"发送消息失败（正文未记录）：{exception.Message}");
         }
         finally
@@ -522,7 +492,7 @@ public sealed class SessionsViewModel : ObservableObject
         }
         catch (Exception exception)
         {
-            ActionError = exception.Message;
+            ActionError = UiText.UserError(exception, "停止任务");
             _logs.Add("desktop", $"停止 Turn 失败：{exception.Message}");
         }
     }
@@ -544,7 +514,7 @@ public sealed class SessionsViewModel : ObservableObject
         catch (Exception exception)
         {
             viewModel.IsResponding = false;
-            ActionError = exception.Message;
+            ActionError = UiText.UserError(exception, "提交处理结果");
             _logs.Add("desktop", $"响应交互请求失败：{exception.Message}");
         }
     }
@@ -591,7 +561,7 @@ public sealed class SessionsViewModel : ObservableObject
                     // completed message.
 					Status = string.IsNullOrWhiteSpace(item.Status) || item.Status.Equals("unknown", StringComparison.OrdinalIgnoreCase)
                         ? known ? (type is "userMessage" or "agentMessage" ? "消息" : "工具") : "未识别项目"
-                        : item.Status,
+                        : UiText.Status(item.Status),
                     IsExpandable = expandable
                 });
             }
@@ -649,7 +619,7 @@ public sealed class SessionsViewModel : ObservableObject
 
     private void MarkTurnCompletedUnverified(BridgeEvent bridgeEvent)
     {
-        MarkTemporaryTurn(bridgeEvent.TurnId, "待确认（Turn 已完成，尚未验证持久化）", false);
+        MarkTemporaryTurn(bridgeEvent.TurnId, "待确认（任务已完成，正在确认保存状态）", false);
     }
 
     private void MarkTemporaryTurn(string turnId, string status, bool failure)
@@ -672,15 +642,15 @@ public sealed class SessionsViewModel : ObservableObject
                 ScheduleRecalibration();
                 break;
             case "completed-unverified":
-                MarkTemporaryTurn(bridgeEvent.TurnId, "待确认（已完成，尚未验证持久化）", false);
+                MarkTemporaryTurn(bridgeEvent.TurnId, "待确认（已完成，正在确认保存状态）", false);
                 break;
             case "persistence-failed":
-                MarkTemporaryTurn(bridgeEvent.TurnId, "持久化失败", true);
+                MarkTemporaryTurn(bridgeEvent.TurnId, "保存状态检查失败", true);
                 SetRuntime(new ThreadRuntime { ThreadId = bridgeEvent.ThreadId, TurnId = bridgeEvent.TurnId, State = "persistence-failed", CanSend = true });
                 break;
             case "thread-mismatch":
-                MarkTemporaryTurn(bridgeEvent.TurnId, "线程不一致：未确认写入", true);
-                ActionError = "持久化验证发现 Thread ID 不一致；该 Turn 不会作为当前 Thread 的成功结果显示。";
+                MarkTemporaryTurn(bridgeEvent.TurnId, "会话不一致：未确认写入", true);
+                ActionError = "检查到会话不一致，本次结果不会显示为当前会话的成功内容。";
                 SetRuntime(new ThreadRuntime { ThreadId = bridgeEvent.ThreadId, TurnId = bridgeEvent.TurnId, State = "thread-mismatch", CanSend = true });
                 break;
             case "failed":
@@ -848,23 +818,5 @@ public sealed class SessionsViewModel : ObservableObject
         Process.Start(info);
     }
 
-    private static string StateText(string state) => state switch
-    {
-        "accepted" => "待确认",
-        "idle" => "空闲",
-        "running" => "正在运行",
-        "running-local" => "正在运行",
-        "running-external" => "由其他 Codex 客户端运行",
-        "waiting-approval" => "等待审批",
-        "waiting-user-input" => "等待回答",
-        "interrupting" => "正在停止",
-        "completed" => "已完成",
-        "completed-unverified" => "已完成，待验证持久化",
-        "persisted" => "已持久化",
-        "persistence-failed" => "持久化失败",
-        "thread-mismatch" => "Thread 不一致",
-        "failed" => "已失败",
-        "unknown" => "控制状态未知",
-        _ => string.IsNullOrWhiteSpace(state) ? "未知" : state
-    };
+    private static string StateText(string state) => UiText.Status(state);
 }

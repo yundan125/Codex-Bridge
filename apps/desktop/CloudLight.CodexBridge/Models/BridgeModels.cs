@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CloudLight.CodexBridge.ViewModels;
 
 namespace CloudLight.CodexBridge.Models;
 
@@ -41,6 +42,10 @@ public class ThreadSummary
     public string Status { get; set; } = "";
 	public string NumberPrefix => Number > 0 ? $"#{Number}" : "#?";
 	public string NumberedTitle => $"{NumberPrefix}  {Title}";
+    public string CreatedAtDisplay => UiText.LocalDateTime(CreatedAt);
+    public string UpdatedAtDisplay => UiText.LocalDateTime(UpdatedAt);
+    public string StatusDisplay => UiText.Status(Status);
+    public Visibility ModelVisibility => string.IsNullOrWhiteSpace(Model) ? Visibility.Collapsed : Visibility.Visible;
 }
 
 public sealed class ThreadDetail : ThreadSummary
@@ -491,6 +496,8 @@ public sealed class QqDiscoveredIdentity
 	public string GroupOpenId { get; set; } = "";
 	public string GroupMemberOpenId { get; set; } = "";
 	public string DiscoveredAt { get; set; } = "";
+    public string TypeDisplay => UiText.ConversationType(Type);
+    public string DiscoveredAtDisplay => UiText.LocalDateTime(DiscoveredAt);
 }
 
 public sealed class BindingListResponse
@@ -515,11 +522,14 @@ public sealed class ChannelBinding
 
     public string ShortId => Abbreviate(Id);
     public string LegacyLabel => Legacy || string.Equals(ChannelType, "qq", StringComparison.OrdinalIgnoreCase)
-        ? "Legacy NapCat Binding"
+        ? "已失效的旧版绑定"
         : string.Empty;
     public string ShortThreadId => Abbreviate(ThreadId);
     public string SafeChatSummary => SafeSummary(ChatId);
     public string DisplayThreadTitle => string.IsNullOrWhiteSpace(ThreadTitle) ? "未提供标题" : ThreadTitle;
+    public string CreatedAtDisplay => UiText.LocalDateTime(CreatedAt);
+    public string ConversationTypeDisplay => UiText.ConversationType(ConversationType);
+    public string ChannelTypeDisplay => string.Equals(ChannelType, "telegram", StringComparison.OrdinalIgnoreCase) ? "Telegram" : "QQ";
 
     private static string Abbreviate(string value) =>
         string.IsNullOrWhiteSpace(value) || value.Length <= 12 ? value : $"{value[..8]}…{value[^4..]}";
