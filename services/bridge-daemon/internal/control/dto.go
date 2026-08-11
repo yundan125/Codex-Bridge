@@ -78,6 +78,7 @@ type Turn struct {
 	Status    string `json:"status"`
 	CreatedAt string `json:"createdAt"`
 	UpdatedAt string `json:"updatedAt"`
+	Error     string `json:"-"`
 	Items     []Item `json:"items"`
 }
 

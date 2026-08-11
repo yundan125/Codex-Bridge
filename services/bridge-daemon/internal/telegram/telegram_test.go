@@ -18,6 +18,7 @@ import (
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/control"
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/events"
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/interactions"
+	bridgequery "cloudlight.dev/codexbridge/bridge-daemon/internal/query"
 	bridgeruntime "cloudlight.dev/codexbridge/bridge-daemon/internal/runtime"
 )
 
@@ -292,6 +293,21 @@ func (f *fakeRuntime) RespondInteraction(_ context.Context, _ string, request in
 func (f *fakeRuntime) VerifyThreadPersistence(context.Context, string) (control.PersistenceVerification, error) {
 	f.verifies++
 	return control.PersistenceVerification{}, nil
+}
+
+func TestTelegramQueriesUseSharedHelpAndNeverStartTurn(t *testing.T) {
+	repository, _ := bindings.NewRepository(filepath.Join(t.TempDir(), "bindings.json"))
+	runtime := &fakeRuntime{}
+	service := NewService(&fakeControl{}, runtime, repository, events.NewBroker(), nil)
+	defer service.Close(context.Background())
+	result, handled := service.queryService().Execute(context.Background(), "/help")
+	if !handled || len(result.Parts) != 1 || result.Parts[0] != bridgequery.HelpText {
+		t.Fatalf("Telegram help did not use shared query semantics: %#v", result)
+	}
+	service.handleCommand(context.Background(), channels.InboundMessage{Address: channels.ChannelAddress{ChannelType: "telegram", ChatID: "1"}}, "/running")
+	if runtime.starts != 0 {
+		t.Fatalf("query started %d Codex Turns", runtime.starts)
+	}
 }
 
 func TestBusyThreadRejectsBeforeRuntimeStart(t *testing.T) {

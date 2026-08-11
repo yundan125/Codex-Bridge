@@ -24,6 +24,13 @@
             <StackPanel Visibility="{Binding ContentVisibility}">
                 <Border Style="{StaticResource CardStyle}">
                     <StackPanel>
+                        <TextBlock Text="远程查询命令" FontSize="18" FontWeight="SemiBold"/>
+                        <TextBlock Text="QQ 与 Telegram 均可直接查询；Bridge 在本地读取现有 Codex 数据，不会提交新任务，也不要求先关联会话。" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,10"/>
+                        <TextBlock Text="/threads   /thread &lt;编号&gt;   /history &lt;编号&gt; [数量]   /running   /waiting   /recent   /failed   /quota" FontFamily="Consolas" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource CardStyle}">
+                    <StackPanel>
                         <Grid>
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                             <StackPanel>

@@ -64,8 +64,10 @@ func normalizeThreadSummary(raw map[string]any) ThreadSummary {
 func normalizeTurn(raw map[string]any) Turn {
 	turn := Turn{
 		TurnID: stringValue(firstValue(raw, "id", "turnId", "turn_id")), Status: statusValue(raw["status"]),
-		CreatedAt: timeValue(firstValue(raw, "createdAt", "created_at")), UpdatedAt: timeValue(firstValue(raw, "updatedAt", "updated_at")),
-		Items: []Item{},
+		CreatedAt: timeValue(firstValue(raw, "createdAt", "created_at", "startedAt", "started_at")),
+		UpdatedAt: timeValue(firstValue(raw, "updatedAt", "updated_at", "completedAt", "completed_at")),
+		Error:     turnErrorText(raw["error"]),
+		Items:     []Item{},
 	}
 	for _, rawItem := range mapSlice(raw["items"]) {
 		if strings.Contains(strings.ToLower(stringValue(rawItem["type"])), "reasoning") {
@@ -74,6 +76,17 @@ func normalizeTurn(raw map[string]any) Turn {
 		turn.Items = append(turn.Items, normalizeItem(rawItem))
 	}
 	return turn
+}
+
+func turnErrorText(value any) string {
+	if text := stringValue(value); text != "" {
+		return text
+	}
+	object, _ := value.(map[string]any)
+	if object == nil {
+		return ""
+	}
+	return stringValue(object["message"])
 }
 
 func normalizeItem(raw map[string]any) Item {

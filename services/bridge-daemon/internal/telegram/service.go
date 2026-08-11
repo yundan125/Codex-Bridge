@@ -19,6 +19,7 @@ import (
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/events"
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/interactions"
 	bridgelog "cloudlight.dev/codexbridge/bridge-daemon/internal/logging"
+	bridgequery "cloudlight.dev/codexbridge/bridge-daemon/internal/query"
 	bridgeruntime "cloudlight.dev/codexbridge/bridge-daemon/internal/runtime"
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/threadregistry"
 )
@@ -101,6 +102,7 @@ type Service struct {
 	broker   *events.Broker
 	logger   *bridgelog.SafeLogger
 	registry *threadregistry.Registry
+	queries  *bridgequery.Service
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -125,7 +127,8 @@ func NewService(controlService Control, runtime Runtime, repository *bindings.Re
 	}
 	service := &Service{
 		control: controlService, runtime: runtime, bindings: repository, broker: broker, logger: logger, registry: registry,
-		ctx: ctx, cancel: cancel, done: make(chan struct{}), routes: make(map[string]*turnRoute),
+		queries: bridgequery.New(controlService, runtime, registry),
+		ctx:     ctx, cancel: cancel, done: make(chan struct{}), routes: make(map[string]*turnRoute),
 		callbacks: make(map[string]callbackAction), waits: make(map[string]inputWait), sessions: make(map[string]*multiSession), flows: make(map[string]*interactionFlow), interactionNotified: make(map[string]bool),
 	}
 	service.adapter = NewAdapter(service.HandleMessage)
@@ -319,10 +322,17 @@ func (s *Service) handleNumbered(ctx context.Context, message channels.InboundMe
 }
 
 func (s *Service) handleTargetCommand(ctx context.Context, message channels.InboundMessage, record threadregistry.Record, text string) {
-	command := strings.ToLower(strings.Fields(text)[0])
+	fields := strings.Fields(text)
+	command := strings.ToLower(fields[0])
 	switch command {
 	case "/status", "/thread":
-		s.statusThread(ctx, message, record.ThreadID)
+		s.runQuery(ctx, message, "/thread "+strconv.Itoa(record.Number))
+	case "/history":
+		queryText := "/history " + strconv.Itoa(record.Number)
+		if len(fields) > 1 {
+			queryText += " " + strings.Join(fields[1:], " ")
+		}
+		s.runQuery(ctx, message, queryText)
 	case "/stop":
 		s.stopThread(ctx, message, record.ThreadID)
 	case "/cancel":
@@ -339,6 +349,10 @@ func (s *Service) handleCommand(ctx context.Context, message channels.InboundMes
 	if len(parts) > 1 {
 		argument = strings.TrimSpace(strings.Join(parts[1:], " "))
 	}
+	if result, handled := s.queryService().Execute(ctx, text); handled {
+		s.sendQuery(ctx, message.Address, result)
+		return
+	}
 	switch command {
 	case "/start":
 		if binding, ok := s.findBinding(message.Address); ok {
@@ -346,18 +360,6 @@ func (s *Service) handleCommand(ctx context.Context, message channels.InboundMes
 		} else {
 			s.send(ctx, message.Address, "CloudLight Codex Bridge is ready. This chat/topic is not bound yet.\nUse /threads to choose a Thread, or /bind <full-thread-id>.\nUse /help to list commands.")
 		}
-	case "/help":
-		s.send(ctx, message.Address, "Codex Bridge Telegram commands:\n/threads — choose a recent Thread\n/bind <full-thread-id> — bind this chat/topic\n/unbind — remove this binding\n/current — show current binding\n/status — show runtime status\n/stop — interrupt the Telegram-started Turn")
-	case "/status":
-		if argument != "" {
-			s.commandThread(ctx, message, argument, "status")
-		} else {
-			s.status(ctx, message)
-		}
-	case "/threads":
-		s.listNumberedThreads(ctx, message, argument)
-	case "/thread":
-		s.commandThread(ctx, message, argument, "thread")
 	case "/bind":
 		if argument == "" {
 			s.send(ctx, message.Address, "Usage: /bind <full-thread-id>. Use /threads to pick from recent Threads.")
@@ -1119,6 +1121,27 @@ func (s *Service) findBinding(address channels.ChannelAddress) (bindings.Binding
 func (s *Service) send(ctx context.Context, address channels.ChannelAddress, text string) {
 	for _, part := range SplitMessage(text, 3900) {
 		_, _ = s.sendOutbound(ctx, channels.OutboundMessage{Address: address, Text: part})
+	}
+}
+
+func (s *Service) queryService() *bridgequery.Service {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.queries == nil {
+		s.queries = bridgequery.New(s.control, s.runtime, s.registry)
+	}
+	return s.queries
+}
+
+func (s *Service) runQuery(ctx context.Context, message channels.InboundMessage, text string) {
+	if result, handled := s.queryService().Execute(ctx, text); handled {
+		s.sendQuery(ctx, message.Address, result)
+	}
+}
+
+func (s *Service) sendQuery(ctx context.Context, address channels.ChannelAddress, result bridgequery.Result) {
+	for _, part := range result.Parts {
+		s.send(ctx, address, part)
 	}
 }
 

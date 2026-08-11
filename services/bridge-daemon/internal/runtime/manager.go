@@ -345,6 +345,16 @@ func (m *Manager) ThreadRead(ctx context.Context, threadID string, includeTurns 
 	return raw, err
 }
 
+// AccountRateLimits returns the official read-only app-server snapshot. It
+// does not derive quota from token usage and does not start or modify a Turn.
+func (m *Manager) AccountRateLimits(ctx context.Context) (map[string]any, error) {
+	client, err := m.runningClient()
+	if err != nil {
+		return nil, err
+	}
+	return client.AccountRateLimits(ctx)
+}
+
 func (m *Manager) runningClient() (*appserver.Client, error) {
 	m.mu.RLock()
 	client := m.client

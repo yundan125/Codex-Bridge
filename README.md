@@ -2,7 +2,7 @@
 
 CloudLight Codex Bridge 是面向 Windows 的 Codex 桌面助手。它可以浏览并继续现有 Codex 会话，通过稳定的 `#N` 聊天编号从 Telegram 或 QQ 机器人发送任务，并把 Codex 的最终回答同步到指定渠道。
 
-当前版本：`0.7.1`
+当前版本：`0.7.2`
 
 ## 主要能力
 
@@ -26,22 +26,22 @@ CloudLight Codex Bridge 是面向 Windows 的 Codex 桌面助手。它可以浏�
 
 ## 下载与安装
 
-0.7.1 的发布目录：
+0.7.2 的发布目录：
 
 ```text
-artifacts\win-x64-0.7.1
+artifacts\win-x64-0.7.2
 ```
 
 完整安装包：
 
 ```text
-artifacts\win-x64-0.7.1\CloudLight-CodexBridge-Setup-0.7.1-win-x64.exe
+artifacts\win-x64-0.7.2\CloudLight-CodexBridge-Setup-0.7.2-win-x64.exe
 ```
 
 便携版可以直接运行：
 
 ```text
-artifacts\win-x64-0.7.1\CloudLight.CodexBridge.exe
+artifacts\win-x64-0.7.2\CloudLight.CodexBridge.exe
 ```
 
 安装器只为当前 Windows 用户安装，不需要管理员权限。卸载软件不会删除 Codex 数据、应用设置、关联会话、聊天编号、日志或已保存的机器人密钥。
@@ -103,22 +103,30 @@ artifacts\win-x64-0.7.1\CloudLight.CodexBridge.exe
 #41 继续完成剩余功能
 ```
 
-消息会进入 `#41` 对应的现有 Codex 会话。常用远程命令：
+消息会进入 `#41` 对应的现有 Codex 会话。QQ 与 Telegram 使用相同的查询命令：
 
 | 命令 | 作用 |
 | --- | --- |
 | `/start` | 查看机器人是否可用 |
 | `/help` | 查看命令帮助 |
-| `/status` | 查看当前关联会话状态 |
-| `/threads` | 列出最近会话和 `#N` 编号 |
-| `/thread <编号或 ID>` | 查看指定会话 |
+| `/status` | 查看 Bridge 与 Codex 连接状态；`/status <编号>` 查看指定会话 |
+| `/threads [页码]` | 按最近更新时间列出会话和 `#N` 编号，每页 20 个 |
+| `/thread <编号>` | 查看指定会话的状态、项目、模型和更新时间 |
+| `/history <编号> [数量]` | 查看最近 1～10 轮 User/Assistant 聊天，默认 3 轮 |
+| `/running` | 只列出当前真实运行中的任务 |
+| `/waiting` | 列出等待用户回答或桌面端审批的会话 |
+| `/recent` | 查看最近有活动的 10 个会话 |
+| `/failed` | 查看最近真实失败的 Codex Turn |
+| `/quota` | 读取 Codex App Server 提供的真实额度窗口 |
 | `/bind <编号或 ID>` | 将当前聊天关联到现有会话 |
 | `/unbind` | 删除当前关联 |
 | `/current` | 查看当前关联会话 |
 | `/stop` | 停止当前聊天发起的任务 |
 | `/cancel` | 取消当前正在等待的回答 |
 
-远程消息只会进入已经存在且可发送的会话，不会创建新会话，也不会更改 Codex 当前的模型、推理强度或安全设置。
+`/threads`、`/thread`、`/history`、`/running`、`/waiting`、`/recent`、`/failed`、`/quota` 和 `/status` 均由 Bridge 在本地直接查询，不会向 Codex 提交新任务、创建 User Message、改变会话或推进消息同步游标。查询命令不要求当前聊天先执行 `/bind`，但仍沿用 QQ 与 Telegram 已配置的允许账号列表。
+
+`/quota` 只显示当前 Codex App Server 的 `account/rateLimits/read` 实际返回值，不根据 Token 用量估算，也不会抓取网页。如果当前 Codex 版本、登录方式或账号没有返回可读额度，机器人会明确说明当前无法读取。
 
 ## Telegram 配置
 
@@ -179,13 +187,13 @@ QQ 配置中仍会使用 OpenID，这是 QQ 开放平台提供的用户或群聊
 
 开发环境与构建说明见 [docs/development.md](docs/development.md)，架构说明见 [docs/architecture.md](docs/architecture.md)。
 
-生成 0.7.1 Release：
+生成 0.7.2 Release：
 
 ```powershell
-.\scripts\build.ps1 -Version 0.7.1
+.\scripts\build.ps1 -Version 0.7.2
 ```
 
-脚本输出到 `artifacts\win-x64-0.7.1`，并拒绝覆盖已存在的版本目录。构建不会执行 Git 提交、标签或推送。
+脚本输出到 `artifacts\win-x64-0.7.2`，并拒绝覆盖已存在的版本目录。构建不会执行 Git 提交、标签或推送。
 
 ## 许可证与第三方说明
 
@@ -196,4 +204,4 @@ QQ 配置中仍会使用 OpenID，这是 QQ 开放平台提供的用户或群聊
 - [licenses/gorilla-websocket-LICENSE.txt](licenses/gorilla-websocket-LICENSE.txt)
 - [docs/upstream-sources.md](docs/upstream-sources.md)
 
-0.7.1 安装包尚未进行商业代码签名，也不包含自动更新。
+0.7.2 安装包尚未进行商业代码签名，也不包含自动更新。

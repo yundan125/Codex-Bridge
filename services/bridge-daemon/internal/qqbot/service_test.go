@@ -11,6 +11,7 @@ import (
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/control"
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/events"
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/interactions"
+	bridgequery "cloudlight.dev/codexbridge/bridge-daemon/internal/query"
 	bridgeruntime "cloudlight.dev/codexbridge/bridge-daemon/internal/runtime"
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/threadregistry"
 )
@@ -156,6 +157,23 @@ func newServiceFixture(t *testing.T, controlService Control, runtime Runtime) (*
 		flows: make(map[string]*interactionFlow), flowByInput: make(map[string]string),
 	}
 	return service, adapter, repository
+}
+
+func TestQQQueriesUseSharedHelpAndNeverStartTurn(t *testing.T) {
+	runtime := &fakeRuntime{}
+	service, adapter, _ := newServiceFixture(t, &fakeControl{}, runtime)
+	result, handled := service.queryService().Execute(context.Background(), "/help")
+	if !handled || len(result.Parts) != 1 || result.Parts[0] != bridgequery.HelpText {
+		t.Fatalf("QQ help did not use shared query semantics: %#v", result)
+	}
+	message := channels.InboundMessage{Address: channels.ChannelAddress{ChannelType: "qqbot", AccountID: "100", ConversationType: "c2c", ChatID: "200"}}
+	service.handleCommand(context.Background(), message, "/running")
+	if runtime.startCount != 0 {
+		t.Fatalf("query started %d Codex Turns", runtime.startCount)
+	}
+	if len(adapter.sent) != 1 || adapter.sent[0].Text != "当前没有正在执行的 Codex 任务。" {
+		t.Fatalf("unexpected QQ query output: %#v", adapter.sent)
+	}
 }
 
 func TestThreadsCacheAndBindAreConversationScoped(t *testing.T) {

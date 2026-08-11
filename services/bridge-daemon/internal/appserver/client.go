@@ -230,6 +230,12 @@ func (c *Client) ThreadRead(ctx context.Context, threadID string, includeTurns b
 	})
 }
 
+// AccountRateLimits reads the official Codex account rate-limit snapshot.
+// The protocol requires an explicit null params value for this read-only RPC.
+func (c *Client) AccountRateLimits(ctx context.Context) (map[string]any, error) {
+	return c.requestValue(ctx, "account/rateLimits/read", nil, true)
+}
+
 func (c *Client) ThreadResume(ctx context.Context, threadID, cwd string) (map[string]any, error) {
 	params := map[string]any{"threadId": threadID, "persistExtendedHistory": true}
 	if strings.TrimSpace(cwd) != "" {
@@ -276,6 +282,10 @@ func (c *Client) RespondServerRequest(ctx context.Context, requestID string, res
 }
 
 func (c *Client) request(ctx context.Context, method string, params map[string]any) (map[string]any, error) {
+	return c.requestValue(ctx, method, params, params != nil)
+}
+
+func (c *Client) requestValue(ctx context.Context, method string, params any, includeParams bool) (map[string]any, error) {
 	id := c.nextID.Add(1)
 	reply := make(chan response, 1)
 	c.mu.Lock()
@@ -287,7 +297,7 @@ func (c *Client) request(ctx context.Context, method string, params map[string]a
 	c.mu.Unlock()
 
 	payload := map[string]any{"jsonrpc": "2.0", "id": id, "method": method}
-	if params != nil {
+	if includeParams {
 		payload["params"] = params
 	}
 	if err := c.write(payload); err != nil {
