@@ -3,8 +3,11 @@ package runtime
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/control"
+	"cloudlight.dev/codexbridge/bridge-daemon/internal/events"
+	"cloudlight.dev/codexbridge/bridge-daemon/internal/interactions"
 )
 
 func TestSelectedThreadIdentityFailsClosed(t *testing.T) {
@@ -35,6 +38,19 @@ func TestCompletedNotificationRemainsUnverified(t *testing.T) {
 	}
 	if completedNotificationState("completed") == StatePersisted {
 		t.Fatal("turn/completed alone must never be persisted")
+	}
+}
+
+func TestApplyVerificationStateDoesNotRepublishPersistedTurn(t *testing.T) {
+	broker := events.NewBroker()
+	manager := &Manager{states: map[string]control.RuntimeState{"thread": {ThreadID: "thread", TurnID: "turn", State: StatePersisted}}, broker: broker, interactions: interactions.NewStore()}
+	stream, unsubscribe := broker.Subscribe()
+	defer unsubscribe()
+	manager.applyVerificationState(control.PersistenceVerification{ThreadID: "thread", ExpectedTurnID: "turn", Status: StatePersisted})
+	select {
+	case event := <-stream:
+		t.Fatalf("duplicate persisted verification published %s", event.EventType)
+	case <-time.After(50 * time.Millisecond):
 	}
 }
 

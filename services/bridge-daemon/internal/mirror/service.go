@@ -111,11 +111,17 @@ type Service struct {
 	turnOrigins       map[string]string
 	retry             map[string]bool
 	syncLocks         map[string]*sync.Mutex
+	pendingSync       map[string]string
+	rolloutFinals     map[string]rolloutFinal
+	observedFinals    map[string]bool
+	resolvedFinals    map[string]bool
+	completedFinals   map[string]bool
 	lastTelegramError string
 	lastQQError       string
 	lastQQErrorCode   string
 }
 type visibleMessage struct{ Key, TurnID, ItemID, Kind, Text, Origin string }
+type rolloutFinal struct{ ThreadID, TurnID, ItemID, Text, CompletedAt string }
 
 type mirrorTargetError struct {
 	message string
@@ -130,12 +136,13 @@ func DefaultConfig() Config {
 
 func New(path string, controlService Control, _ Runtime, registry *threadregistry.Registry, broker *events.Broker, logger *bridgelog.SafeLogger, telegram, qq Target) (*Service, error) {
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Service{path: path, control: controlService, registry: registry, broker: broker, logger: logger, telegram: telegram, qq: qq, ctx: ctx, cancel: cancel, done: make(chan struct{}), turnOrigins: map[string]string{}, retry: map[string]bool{}, syncLocks: map[string]*sync.Mutex{}, model: diskModel{Version: 1, Config: DefaultConfig(), Cursors: map[string]Cursor{}, LiveDelivered: map[string]liveCursor{}, Finals: map[string]finalRecord{}}}
+	s := &Service{path: path, control: controlService, registry: registry, broker: broker, logger: logger, telegram: telegram, qq: qq, ctx: ctx, cancel: cancel, done: make(chan struct{}), turnOrigins: map[string]string{}, retry: map[string]bool{}, syncLocks: map[string]*sync.Mutex{}, pendingSync: map[string]string{}, rolloutFinals: map[string]rolloutFinal{}, observedFinals: map[string]bool{}, resolvedFinals: map[string]bool{}, completedFinals: map[string]bool{}, model: diskModel{Version: 1, Config: DefaultConfig(), Cursors: map[string]Cursor{}, LiveDelivered: map[string]liveCursor{}, Finals: map[string]finalRecord{}}}
 	if err := s.load(); err != nil {
 		cancel()
 		return nil, err
 	}
 	go s.eventLoop()
+	s.goRun(s.watchRollouts)
 	return s, nil
 }
 
@@ -256,7 +263,11 @@ func (s *Service) handleEvent(event events.Event) {
 		s.goRun(s.retryAll)
 	case events.ThreadUpdated:
 		if event.ThreadID != "" {
-			s.goRun(func() { s.syncThread(event.ThreadID) })
+			source, _ := event.Payload["source"].(string)
+			s.triggerSync(event.ThreadID, firstNonEmpty(source, "appserver"), event.TurnID)
+			if event.TurnID != "" && source == "appserver" {
+				s.scheduleQuickChecks(event.ThreadID, event.TurnID)
+			}
 		}
 	case events.TurnStarted:
 		origin, _ := event.Payload["source"].(string)
@@ -266,7 +277,7 @@ func (s *Service) handleEvent(event events.Event) {
 		s.mu.Lock()
 		s.turnOrigins[event.TurnID] = origin
 		s.mu.Unlock()
-		s.goRun(func() { s.syncThread(event.ThreadID) })
+		s.triggerSync(event.ThreadID, "appserver", event.TurnID)
 	case events.InteractionRequested:
 		if s.enabledType("input") {
 			origin := s.originForTurn(event.TurnID)
@@ -291,7 +302,7 @@ func (s *Service) handleEvent(event events.Event) {
 	case events.TurnCompleted:
 		status, _ := event.Payload["status"].(string)
 		if strings.EqualFold(strings.TrimSpace(status), "persisted") {
-			s.goRun(func() { s.syncThread(event.ThreadID) })
+			s.triggerSync(event.ThreadID, "appserver", event.TurnID)
 		}
 	}
 }
@@ -372,7 +383,59 @@ func cursorNeedsNormalization(messages []visibleMessage, key string) bool {
 	return key != "" && !containsMessageKey(messages, key)
 }
 
-func (s *Service) syncThread(threadID string) {
+func (s *Service) triggerSync(threadID, source, turnID string) {
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" {
+		return
+	}
+	s.mu.Lock()
+	if _, running := s.pendingSync[threadID]; running {
+		s.pendingSync[threadID] = source
+		s.mu.Unlock()
+		return
+	}
+	s.pendingSync[threadID] = ""
+	s.mu.Unlock()
+	s.goRun(func() {
+		current := source
+		for {
+			s.syncThreadSource(threadID, current, turnID)
+			s.mu.Lock()
+			next := s.pendingSync[threadID]
+			if next == "" {
+				delete(s.pendingSync, threadID)
+			} else {
+				s.pendingSync[threadID] = ""
+			}
+			s.mu.Unlock()
+			if next == "" {
+				return
+			}
+			current = next
+		}
+	})
+}
+
+func (s *Service) scheduleQuickChecks(threadID, turnID string) {
+	s.goRun(func() {
+		previous := time.Duration(0)
+		for _, elapsed := range []time.Duration{time.Second, 2 * time.Second, 3 * time.Second, 5 * time.Second, 10 * time.Second} {
+			timer := time.NewTimer(elapsed - previous)
+			select {
+			case <-s.ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+			s.triggerSync(threadID, "retry", turnID)
+			previous = elapsed
+		}
+	})
+}
+
+func (s *Service) syncThread(threadID string) { s.syncThreadSource(threadID, "scanner", "") }
+
+func (s *Service) syncThreadSource(threadID, source, expectedTurnID string) {
 	lock := s.threadSyncLock(threadID)
 	lock.Lock()
 	defer lock.Unlock()
@@ -380,10 +443,35 @@ func (s *Service) syncThread(threadID string) {
 	defer cancel()
 	detail, err := s.control.ReadThread(ctx, threadID, true)
 	if err != nil {
-		return
+		s.mu.Lock()
+		fallback := s.rolloutFinals[threadID]
+		s.mu.Unlock()
+		if fallback.TurnID == "" {
+			return
+		}
+		detail.ThreadID = threadID
+		if record, ok := s.registry.ByThreadID(threadID); ok {
+			detail.Title, detail.Number = record.Title, record.Number
+		}
 	}
 	_, _ = s.registry.Ensure(threadregistry.Metadata{ThreadID: detail.ThreadID, Title: detail.Title, CWD: detail.CWD, CreatedAt: detail.CreatedAt, LastSeenAt: detail.UpdatedAt})
 	messages := visibleMessages(detail, s.originForTurn)
+	if expectedTurnID != "" {
+		for _, message := range messages {
+			if message.TurnID == expectedTurnID {
+				s.logFinalMilestone("final_first_observed", threadID, expectedTurnID, source)
+				break
+			}
+		}
+	}
+	s.mu.Lock()
+	rollout := s.rolloutFinals[threadID]
+	s.mu.Unlock()
+	useRollout := rollout.TurnID != "" && !containsTurn(messages, rollout.TurnID) &&
+		((expectedTurnID != "" && rollout.TurnID == expectedTurnID) || source == "watcher")
+	if useRollout {
+		messages = append(messages, visibleMessage{Key: rollout.TurnID + "/" + rollout.ItemID, TurnID: rollout.TurnID, ItemID: rollout.ItemID, Kind: "assistant", Text: rollout.Text})
+	}
 	s.mu.Lock()
 	cursor, exists := s.model.Cursors[threadID]
 	cfg := s.model.Config
@@ -414,42 +502,66 @@ func (s *Service) syncThread(threadID string) {
 	if len(messages) == 0 {
 		return
 	}
-	for _, message := range afterCursor(messages, cursor.LastTelegramMirrored) {
-		if !cfg.Enabled || !cfg.Telegram.Enabled || !messageEnabled(cfg.Messages, message.Kind) {
-			cursor.LastTelegramMirrored = message.Key
-			continue
+	if expectedTurnID != "" {
+		for _, message := range messages {
+			if message.TurnID == expectedTurnID {
+				s.logFinalMilestone("final_resolved", threadID, message.TurnID, source)
+				break
+			}
 		}
-		if s.isFinalMirrored(message.Key, "telegram") {
-			cursor.LastTelegramMirrored = message.Key
-			continue
-		}
-		if err := s.sendVisible(ctx, detail, message, "telegram"); err != nil {
-			break
-		}
-		s.markFinalMirrored(message.Key, "telegram", cfg)
-		cursor.LastTelegramMirrored = message.Key
 	}
-	for _, message := range afterCursor(messages, cursor.LastQQMirrored) {
-		if !cfg.Enabled || !cfg.QQ.Enabled || !messageEnabled(cfg.Messages, message.Kind) {
-			cursor.LastQQMirrored = message.Key
-			continue
+	var deliveries sync.WaitGroup
+	deliver := func(platform string, last *string) {
+		defer deliveries.Done()
+		for _, message := range afterCursor(messages, *last) {
+			if !cfg.Enabled || (platform == "telegram" && !cfg.Telegram.Enabled) || (platform == "qqbot" && !cfg.QQ.Enabled) || !messageEnabled(cfg.Messages, message.Kind) {
+				*last = message.Key
+				continue
+			}
+			if s.isFinalMirrored(message.Key, platform) {
+				*last = message.Key
+				continue
+			}
+			if err := s.sendVisible(ctx, detail, message, platform); err != nil {
+				break
+			}
+			s.markFinalMirrored(message.Key, platform, cfg)
+			*last = message.Key
+			stage := platform
+			if stage == "qqbot" {
+				stage = "qq"
+			}
+			s.logger.Printf("latency stage=%s_sent threadId=%s turnId=%s at=%s source=%s", stage, threadID, message.TurnID, time.Now().UTC().Format(time.RFC3339Nano), source)
 		}
-		if s.isFinalMirrored(message.Key, "qqbot") {
-			cursor.LastQQMirrored = message.Key
-			continue
-		}
-		if err := s.sendVisible(ctx, detail, message, "qqbot"); err != nil {
-			break
-		}
-		s.markFinalMirrored(message.Key, "qqbot", cfg)
-		cursor.LastQQMirrored = message.Key
 	}
+	deliveries.Add(2)
+	go deliver("telegram", &cursor.LastTelegramMirrored)
+	go deliver("qqbot", &cursor.LastQQMirrored)
+	deliveries.Wait()
 	cursor.LastObservedMessage = messages[len(messages)-1].Key
 	s.mu.Lock()
 	s.model.Cursors[threadID] = cursor
 	s.retry[threadID] = (cfg.Enabled && cfg.Telegram.Enabled && cursor.LastTelegramMirrored != cursor.LastObservedMessage) || (cfg.Enabled && cfg.QQ.Enabled && cursor.LastQQMirrored != cursor.LastObservedMessage)
 	_ = s.saveLocked()
 	s.mu.Unlock()
+}
+
+func (s *Service) logFinalMilestone(stage, threadID, turnID, source string) {
+	key := threadID + "/" + turnID
+	s.mu.Lock()
+	seen := s.observedFinals
+	if stage == "final_resolved" {
+		seen = s.resolvedFinals
+	} else if stage == "turn_completed" {
+		seen = s.completedFinals
+	}
+	if seen[key] {
+		s.mu.Unlock()
+		return
+	}
+	seen[key] = true
+	s.mu.Unlock()
+	s.logger.Printf("latency stage=%s threadId=%s turnId=%s at=%s source=%s", stage, threadID, turnID, time.Now().UTC().Format(time.RFC3339Nano), source)
 }
 
 func (s *Service) isFinalMirrored(key, platform string) bool {
@@ -498,13 +610,13 @@ func (s *Service) retryFailed() {
 	s.mu.Unlock()
 	for _, id := range ids {
 		threadID := id
-		s.goRun(func() { s.syncThread(threadID) })
+		s.triggerSync(threadID, "retry", "")
 	}
 }
 func (s *Service) retryAll() {
 	for _, record := range s.registry.List() {
 		threadID := record.ThreadID
-		s.goRun(func() { s.syncThread(threadID) })
+		s.triggerSync(threadID, "scanner", "")
 	}
 }
 
