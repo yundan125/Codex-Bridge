@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Security.Cryptography;
 using CloudLight.CodexBridge.Services;
 using CloudLight.CodexBridge.Models;
+using CloudLight.CodexBridge.ViewModels;
 using Microsoft.Win32;
 
 if (args.Contains("--live-codex-discovery", StringComparer.OrdinalIgnoreCase))
@@ -136,8 +137,36 @@ Assert(CodexDiscoveryService.EnumerateInstallationCandidates(discoveryDirectory)
         .Any(candidate => string.Equals(candidate, nestedCodex, StringComparison.OrdinalIgnoreCase)),
     "ChatGPT 安装目录搜索必须覆盖合理深度的非版本化子目录");
 
+var runtimeSettings = new UserSettings();
+var runtimeLogs = new LogService();
+using (var runtimeApi = new BridgeApiClient(runtimeLogs))
+{
+    var settingsViewModel = new SettingsViewModel(new SettingsService(), runtimeApi, runtimeSettings, runtimeLogs, new StartupService());
+    var runningChatGPT = new CodexDiscoveryResult(true, fakeCodex, "codex-cli 9.9.9", CodexDiscoverySource.ChatGPTProcess);
+    settingsViewModel.UpdateDiscovery(runningChatGPT);
+    Assert(string.Equals(runtimeSettings.CodexCustomPath, fakeCodex, StringComparison.OrdinalIgnoreCase) &&
+           string.Equals(settingsViewModel.CodexCustomPath, fakeCodex, StringComparison.OrdinalIgnoreCase) &&
+           string.Equals(settingsViewModel.CodexCliPath, fakeCodex, StringComparison.OrdinalIgnoreCase),
+        "discovery 必须同步更新共享 Settings 和 SettingsViewModel 内存路径");
+    Assert(settingsViewModel.CodexDetection.Contains("正在运行的 ChatGPT", StringComparison.Ordinal) &&
+           settingsViewModel.CodexDetection.Contains("验证：已通过", StringComparison.Ordinal),
+        "discovery 后前端必须立即显示来源和验证状态");
+    settingsViewModel.UpdateRuntimeStatus(new BridgeStatus
+    {
+        CodexCliPath = fakeCodex,
+        CodexCliVersion = "codex-cli 9.9.9",
+        CodexCliAvailable = true,
+        CodexCliPathSource = "RunningChatGPT",
+        CodexCliValidationStatus = "succeeded",
+        CodexCliConnectionStatus = "connected",
+        AppServerRunning = true
+    }, "运行中");
+    Assert(settingsViewModel.CodexDetection.Contains("连接：已连接", StringComparison.Ordinal),
+        "codex.connected 状态必须立即反映到前端");
+}
+
 Directory.Delete(root, true);
-Console.WriteLine("PASS backup/restore, startup registry, Codex SavedPath/PATH validation, ChatGPT directory search");
+Console.WriteLine("PASS backup/restore, Codex discovery/runtime Settings sync, UI status, ChatGPT directory search");
 return;
 
 static Dictionary<string, string> Snapshot(params string[] roots)

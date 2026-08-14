@@ -9,7 +9,14 @@ import (
 )
 
 func configureCommand(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.HideWindow = true
+}
+
+func configureBatchCommand(cmd *exec.Cmd, commandLine string) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CmdLine: commandLine}
 }
 
 func terminateOwnedProcess(cmd *exec.Cmd) error {

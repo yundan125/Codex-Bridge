@@ -514,7 +514,9 @@ func (m *Manager) verifySnapshots(
 		expectedTurnID, mainSnapshot.UserMessageItemID, mainSnapshot.AssistantMessageItemID)
 	m.logRolloutVerification(threadID, expectedTurnID, verification.Rollout)
 
-	probeResult, probeErr := appserver.ProbeThread(ctx, m.detection.Path, m.cwd, m.status.Version, threadID, m.logger)
+	detection, _ := m.connectionConfig()
+	status := m.Status()
+	probeResult, probeErr := appserver.ProbeThread(ctx, detection.Path, m.cwd, status.Version, threadID, m.logger)
 	if probeErr == nil {
 		verification.Probe = persistenceSnapshot(probeResult.Raw, expectedTurnID)
 	}
@@ -816,12 +818,13 @@ func fileContainsAny(path string, identifiers ...string) (bool, error) {
 
 func (m *Manager) codexEnvironment(threadID string) control.CodexEnvironment {
 	probeEnvironment := appserver.ProbeEnvironmentSnapshot()
+	status := m.Status()
 	username := strings.TrimSpace(os.Getenv("USERNAME"))
 	if current, err := user.Current(); err == nil && strings.TrimSpace(current.Username) != "" {
 		username = current.Username
 	}
 	environment := control.CodexEnvironment{
-		CodexCLIPath: m.detection.Path, CodexCLIVersion: m.detection.Version,
+		CodexCLIPath: status.CodexCLIPath, CodexCLIVersion: status.CodexCLIVersion,
 		Username: username, UserProfile: probeEnvironment.UserProfile, Home: probeEnvironment.Home,
 		CodexHomeExplicit: probeEnvironment.CodexHomeExplicit, CodexHome: probeEnvironment.CodexHome,
 		ResolvedCodexDataRoot:     probeEnvironment.ResolvedCodexDataRoot,

@@ -11,6 +11,9 @@ public sealed class BridgeStatus
 	public string CodexCliPath { get; set; } = "";
 	public string CodexCliVersion { get; set; } = "";
     public bool CodexCliAvailable { get; set; }
+    public string CodexCliPathSource { get; set; } = "";
+    public string CodexCliValidationStatus { get; set; } = "";
+    public string CodexCliConnectionStatus { get; set; } = "";
     public bool AppServerRunning { get; set; }
     public int AppServerPid { get; set; }
     public string LastError { get; set; } = "";
@@ -253,6 +256,12 @@ public sealed class InteractionResponse
 public sealed class SecuritySettingsRequest
 {
     public string SandboxMode { get; set; } = "workspace-write";
+}
+
+public sealed class CodexSettingsRequest
+{
+    public string Path { get; set; } = "";
+    public string Source { get; set; } = "Manual";
 }
 
 public sealed class RemoteCommandListResponse

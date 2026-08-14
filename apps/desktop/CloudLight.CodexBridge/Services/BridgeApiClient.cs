@@ -56,6 +56,9 @@ public sealed class BridgeApiClient(LogService logs) : IDisposable
     public Task<BridgeStatus> UpdateSecurityAsync(string sandboxMode, CancellationToken cancellationToken = default) =>
         SendJsonAsync<BridgeStatus>(HttpMethod.Put, "/api/v1/settings/security", new SecuritySettingsRequest { SandboxMode = sandboxMode }, cancellationToken);
 
+    public Task<BridgeStatus> ApplyCodexPathAsync(string path, string source, CancellationToken cancellationToken = default) =>
+        SendJsonAsync<BridgeStatus>(HttpMethod.Put, "/api/v1/settings/codex", new CodexSettingsRequest { Path = path, Source = source }, cancellationToken);
+
     public Task<RemoteCommandListResponse> GetCommandsAsync(CancellationToken cancellationToken = default) =>
         GetAsync<RemoteCommandListResponse>("/api/v1/commands", cancellationToken);
 

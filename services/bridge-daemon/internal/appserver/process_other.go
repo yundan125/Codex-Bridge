@@ -6,6 +6,8 @@ import "os/exec"
 
 func configureCommand(_ *exec.Cmd) {}
 
+func configureBatchCommand(_ *exec.Cmd, _ string) {}
+
 func terminateOwnedProcess(cmd *exec.Cmd) error {
 	if cmd == nil || cmd.Process == nil {
 		return nil

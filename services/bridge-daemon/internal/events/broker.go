@@ -12,6 +12,7 @@ const (
 	DaemonStopped           = "daemon.stopped"
 	CodexConnected          = "codex.connected"
 	CodexDisconnected       = "codex.disconnected"
+	CodexConfigUpdated      = "codex.config_updated"
 	ThreadUpdated           = "thread.updated"
 	TurnStarted             = "turn.started"
 	TurnStatusChanged       = "turn.status_changed"

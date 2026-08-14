@@ -15,7 +15,17 @@ public sealed record CodexDiscoveryResult(
     bool Found,
     string Path,
     string Version,
-    CodexDiscoverySource Source);
+    CodexDiscoverySource Source)
+{
+    public string RuntimeSource => Source switch
+    {
+        CodexDiscoverySource.CodexProcess => "RunningCodex",
+        CodexDiscoverySource.ChatGPTProcess => "RunningChatGPT",
+        CodexDiscoverySource.PATH => "PATH",
+        CodexDiscoverySource.SavedPath => "SavedPath",
+        _ => ""
+    };
+}
 
 public sealed class CodexDiscoveryService(LogService logs)
 {
@@ -67,7 +77,8 @@ public sealed class CodexDiscoveryService(LogService logs)
 
     private CodexDiscoveryResult LogSuccess(CodexDiscoveryResult result)
     {
-        logs.Add("desktop", $"Codex 自动发现成功：source={result.Source} path={result.Path} version={result.Version}");
+        logs.Add("codex-discovery", $"[codex-discovery] discovered path={result.Path} source={result.RuntimeSource}");
+        logs.Add("codex-discovery", $"[codex-discovery] validation succeeded path={result.Path} version={result.Version}");
         return result;
     }
 
