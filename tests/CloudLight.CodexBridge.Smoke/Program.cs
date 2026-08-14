@@ -4,6 +4,25 @@ using CloudLight.CodexBridge.Services;
 using CloudLight.CodexBridge.Models;
 using Microsoft.Win32;
 
+if (args.Contains("--live-codex-discovery", StringComparer.OrdinalIgnoreCase))
+{
+    var originalPath = Environment.GetEnvironmentVariable("PATH");
+    try
+    {
+        Environment.SetEnvironmentVariable("PATH", "");
+        var liveDiscovery = await new CodexDiscoveryService(new LogService())
+            .DiscoverAsync(@"Z:\missing-codex.exe");
+        Assert(liveDiscovery.Found && liveDiscovery.Source is CodexDiscoverySource.CodexProcess or CodexDiscoverySource.ChatGPTProcess,
+            "清空 PATH 后必须能从当前 Codex/ChatGPT 进程发现有效 Codex");
+        Console.WriteLine($"PASS live Codex discovery: {liveDiscovery.Source} {liveDiscovery.Path} {liveDiscovery.Version}");
+        return;
+    }
+    finally
+    {
+        Environment.SetEnvironmentVariable("PATH", originalPath);
+    }
+}
+
 var root = Path.Combine(Path.GetTempPath(), $"CloudLight-CodexBridge-Smoke-{Guid.NewGuid():N}");
 var codex = Path.Combine(root, "codex-current");
 var bridgeLocal = Path.Combine(root, "bridge-local");
@@ -83,8 +102,42 @@ finally
     else key.SetValue(StartupService.ValueName, previous);
 }
 
+var discoveryDirectory = Path.Combine(root, "codex-discovery");
+Directory.CreateDirectory(discoveryDirectory);
+var fakeCodex = Path.Combine(discoveryDirectory, "codex.cmd");
+await File.WriteAllTextAsync(fakeCodex, "@echo codex-cli 9.9.9\r\n@exit /b 0\r\n");
+var discovery = new CodexDiscoveryService(new LogService());
+var fromSavedPath = await discovery.DiscoverAsync(fakeCodex);
+Assert(fromSavedPath.Found && fromSavedPath.Source == CodexDiscoverySource.SavedPath,
+    "有效的已保存路径必须优先命中 SavedPath");
+Assert(string.Equals(fromSavedPath.Path, fakeCodex, StringComparison.OrdinalIgnoreCase),
+    "SavedPath 必须返回经过验证的绝对路径");
+
+var previousPath = Environment.GetEnvironmentVariable("PATH");
+var previousPathExt = Environment.GetEnvironmentVariable("PATHEXT");
+try
+{
+    Environment.SetEnvironmentVariable("PATH", discoveryDirectory);
+    Environment.SetEnvironmentVariable("PATHEXT", ".CMD");
+    var fromPath = await discovery.DiscoverAsync(Path.Combine(root, "missing-codex.exe"));
+    Assert(fromPath.Found && fromPath.Source == CodexDiscoverySource.PATH,
+        "旧路径失效后必须继续从 PATH 发现并验证 Codex");
+}
+finally
+{
+    Environment.SetEnvironmentVariable("PATH", previousPath);
+    Environment.SetEnvironmentVariable("PATHEXT", previousPathExt);
+}
+
+var nestedCodex = Path.Combine(discoveryDirectory, "app", "resources", "nested", "codex.exe");
+Directory.CreateDirectory(Path.GetDirectoryName(nestedCodex)!);
+await File.WriteAllTextAsync(nestedCodex, "placeholder");
+Assert(CodexDiscoveryService.EnumerateInstallationCandidates(discoveryDirectory)
+        .Any(candidate => string.Equals(candidate, nestedCodex, StringComparison.OrdinalIgnoreCase)),
+    "ChatGPT 安装目录搜索必须覆盖合理深度的非版本化子目录");
+
 Directory.Delete(root, true);
-Console.WriteLine("PASS backup/restore SHA-256 roundtrip, corrupt rejection, PreRestore, startup registry");
+Console.WriteLine("PASS backup/restore, startup registry, Codex SavedPath/PATH validation, ChatGPT directory search");
 return;
 
 static Dictionary<string, string> Snapshot(params string[] roots)
