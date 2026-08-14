@@ -86,8 +86,7 @@ public sealed class MainViewModel : ObservableObject
             _api.StartEventStream();
             BackendState = "运行中";
             await RefreshAsync();
-            await Settings.RefreshMirrorAsync();
-            if (CurrentPageKey == "channels") await Channels.EnsureInitializedAsync(_lifetime.Token);
+            await InitializeRemoteChannelsAsync(forceRetry: false);
             if (CurrentPageKey == "commands") await Commands.EnsureInitializedAsync(_lifetime.Token);
             _initialized = true;
         }
@@ -113,7 +112,6 @@ public sealed class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(IsMirrorPage)); OnPropertyChanged(nameof(IsBackupPage)); OnPropertyChanged(nameof(IsSettingsPage)); OnPropertyChanged(nameof(IsLogsPage));
         _settings.LastPage = CurrentPageKey;
         _ = _settingsService.SaveAsync(_settings);
-        if (ReferenceEquals(CurrentPage, Channels)) _ = Channels.EnsureInitializedAsync(_lifetime.Token);
         if (ReferenceEquals(CurrentPage, Commands)) _ = Commands.EnsureInitializedAsync(_lifetime.Token);
         if (ReferenceEquals(CurrentPage, Mirror)) _ = Settings.RefreshMirrorAsync();
     }
@@ -162,14 +160,23 @@ public sealed class MainViewModel : ObservableObject
         _api.Connect(new Uri(ready.Address), _daemon.Token);
         _api.StartEventStream();
         await RefreshAsync();
-        if (Channels.IsContentReady) await Channels.RefreshAsync(_lifetime.Token, preserveOperationMessage: true);
+        await InitializeRemoteChannelsAsync(forceRetry: true);
         await Commands.RefreshAsync(_lifetime.Token);
+    }
+
+    private async Task InitializeRemoteChannelsAsync(bool forceRetry)
+    {
+        // The daemon creates its channel services before publishing its ready message.
+        // Load local secrets and configure/start those services only after API connection,
+        // then enable message mirroring so it cannot race channel initialization.
+        await Channels.EnsureInitializedAsync(_lifetime.Token, forceRetry).ConfigureAwait(false);
+        await Settings.InitializeMirrorAsync(_settings.MirrorAutoStart, _lifetime.Token).ConfigureAwait(false);
     }
 
     private void OnEventReceived(object? sender, BridgeEvent bridgeEvent)
     {
         QueueUiAction(() => Sessions.ApplyEvent(bridgeEvent));
-        if (bridgeEvent.EventType.StartsWith("channel.", StringComparison.OrdinalIgnoreCase) || bridgeEvent.EventType.StartsWith("binding.", StringComparison.OrdinalIgnoreCase) || bridgeEvent.EventType.StartsWith("telegram.", StringComparison.OrdinalIgnoreCase) || bridgeEvent.EventType.StartsWith("qq.", StringComparison.OrdinalIgnoreCase))
+        if (bridgeEvent.EventType.StartsWith("channel.", StringComparison.OrdinalIgnoreCase) || bridgeEvent.EventType.StartsWith("binding.", StringComparison.OrdinalIgnoreCase) || bridgeEvent.EventType.StartsWith("telegram.", StringComparison.OrdinalIgnoreCase) || bridgeEvent.EventType.StartsWith("qq.", StringComparison.OrdinalIgnoreCase) || bridgeEvent.EventType.StartsWith("qqbot.", StringComparison.OrdinalIgnoreCase))
             if (Channels.IsContentReady) QueueUiAction(() => Channels.ApplyEvent(bridgeEvent));
         if (bridgeEvent.EventType is "codex.connected" or "codex.disconnected" or "error") { QueueUiTask(RefreshAsync); return; }
         if (bridgeEvent.EventType != "thread.updated") return;

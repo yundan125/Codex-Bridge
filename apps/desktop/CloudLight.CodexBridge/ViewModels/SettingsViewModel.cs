@@ -13,6 +13,7 @@ public sealed class SettingsViewModel : ObservableObject
     private readonly UserSettings _settings;
     private readonly LogService _logs;
     private readonly StartupService _startup;
+	private readonly SemaphoreSlim _mirrorOperationLock = new(1, 1);
     private string _codexCustomPath;
     private string _sandboxMode;
     private string _codexDetection = "等待后端检测";
@@ -146,10 +147,40 @@ public sealed class SettingsViewModel : ObservableObject
 	public string MirrorStatusText { get=>_mirrorStatusText; private set=>SetProperty(ref _mirrorStatusText,value); }
 	public string QqCapabilityNotice { get=>_qqCapabilityNotice; private set=>SetProperty(ref _qqCapabilityNotice,value); }
 
-	public async Task RefreshMirrorAsync()
+	public Task RefreshMirrorAsync(CancellationToken cancellationToken = default) =>
+		LoadMirrorAsync(autoStart: false, cancellationToken);
+
+	public Task InitializeMirrorAsync(bool autoStart, CancellationToken cancellationToken = default) =>
+		LoadMirrorAsync(autoStart, cancellationToken);
+
+	private async Task LoadMirrorAsync(bool autoStart, CancellationToken cancellationToken)
 	{
-		try { ApplyMirrorStatus(await _api.GetMirrorAsync()); }
-		catch (Exception exception) { MirrorStatusText = UiText.UserError(exception, "读取同步状态"); }
+		try
+		{
+			await _mirrorOperationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+			try
+			{
+				var status = await _api.GetMirrorAsync(cancellationToken).ConfigureAwait(false);
+				if (autoStart && !status.Config.Enabled)
+				{
+					status.Config.Enabled = true;
+					status = await _api.ConfigureMirrorAsync(status.Config, cancellationToken).ConfigureAwait(false);
+				}
+				await RunOnUiAsync(() => ApplyMirrorStatus(status));
+			}
+			finally
+			{
+				_mirrorOperationLock.Release();
+			}
+		}
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+		{
+		}
+		catch (Exception exception)
+		{
+			_logs.AddException("desktop", "初始化消息同步失败。", exception);
+			await RunOnUiAsync(() => MirrorStatusText = UiText.UserError(exception, "读取同步状态"));
+		}
 	}
 
 	private void ApplyMirrorStatus(MirrorStatus status)
@@ -229,4 +260,15 @@ public sealed class SettingsViewModel : ObservableObject
         info.ArgumentList.Add(path);
         Process.Start(info);
     }
+
+	private static Task RunOnUiAsync(Action action)
+	{
+		var dispatcher = Application.Current?.Dispatcher;
+		if (dispatcher is null || dispatcher.CheckAccess())
+		{
+			action();
+			return Task.CompletedTask;
+		}
+		return dispatcher.InvokeAsync(action).Task;
+	}
 }

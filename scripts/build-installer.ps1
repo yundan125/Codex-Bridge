@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "0.8.0",
+    [string]$Version = "1.0.0",
     [string]$OutputDirectory = "",
     [string]$InnoCompiler = ""
 )
