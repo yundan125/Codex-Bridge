@@ -12,6 +12,8 @@ public sealed class MainViewModel : ObservableObject
     private readonly UserSettings _settings;
     private readonly SettingsService _settingsService;
     private readonly LogService _logs;
+    private readonly CodexDiscoveryService _codexDiscoveryService;
+    private CodexDiscoveryResult _codexDiscovery;
     private readonly CancellationTokenSource _lifetime = new();
     private CancellationTokenSource? _eventRefresh;
     private object _currentPage;
@@ -25,7 +27,8 @@ public sealed class MainViewModel : ObservableObject
     public MainViewModel(DaemonProcessManager daemon, BridgeApiClient api, SessionsViewModel sessions,
         ChannelsViewModel channels, CommandsViewModel commands, OverviewViewModel overview, MirrorViewModel mirror, BackupViewModel backup,
         SettingsViewModel settingsViewModel, LogsViewModel logsViewModel, UserSettings settings,
-        SettingsService settingsService, LogService logs)
+        SettingsService settingsService, LogService logs, CodexDiscoveryService codexDiscoveryService,
+        CodexDiscoveryResult codexDiscovery)
     {
         _daemon = daemon;
         _api = api;
@@ -40,6 +43,8 @@ public sealed class MainViewModel : ObservableObject
         _settings = settings;
         _settingsService = settingsService;
         _logs = logs;
+        _codexDiscoveryService = codexDiscoveryService;
+        _codexDiscovery = codexDiscovery;
         CurrentPageKey = settings.RestoreLastPage ? NormalizePage(settings.LastPage) : "overview";
         _currentPage = ResolvePage(CurrentPageKey);
         NavigateCommand = new RelayCommand(Navigate);
@@ -84,10 +89,34 @@ public sealed class MainViewModel : ObservableObject
             var ready = await _daemon.StartAsync(_settings, _lifetime.Token);
             _api.Connect(new Uri(ready.Address), _daemon.Token);
             _api.StartEventStream();
+            if (!_codexDiscovery.Found)
+            {
+                _codexDiscovery = await _codexDiscoveryService.DiscoverAsync(_settings.CodexCustomPath, _lifetime.Token);
+                if (_codexDiscovery.Found)
+                {
+                    _settings.CodexCustomPath = _codexDiscovery.Path;
+                    Settings.UpdateDiscovery(_codexDiscovery);
+                    _logs.Add("codex-config", $"[codex-config] runtime path updated path={_codexDiscovery.Path} target=desktop-settings");
+                    try
+                    {
+                        await _settingsService.SaveAsync(_settings);
+                        _logs.Add("codex-config", $"[codex-config] persisted path={_codexDiscovery.Path}");
+                    }
+                    catch (Exception exception)
+                    {
+                        _logs.AddException("codex-config", "持久化自动发现的 Codex 路径失败；仍将应用到当前运行时。", exception);
+                    }
+                }
+            }
+            if (_codexDiscovery.Found)
+            {
+                _logs.Add("codex-daemon", $"[codex-daemon] applying new Codex path path={_codexDiscovery.Path}");
+                var applied = await _api.ApplyCodexPathAsync(_codexDiscovery.Path, _codexDiscovery.RuntimeSource, _lifetime.Token);
+                Settings.UpdateRuntimeStatus(applied, BackendState);
+            }
             BackendState = "运行中";
             await RefreshAsync();
-            await Settings.RefreshMirrorAsync();
-            if (CurrentPageKey == "channels") await Channels.EnsureInitializedAsync(_lifetime.Token);
+            await InitializeRemoteChannelsAsync(forceRetry: false);
             if (CurrentPageKey == "commands") await Commands.EnsureInitializedAsync(_lifetime.Token);
             _initialized = true;
         }
@@ -113,7 +142,6 @@ public sealed class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(IsMirrorPage)); OnPropertyChanged(nameof(IsBackupPage)); OnPropertyChanged(nameof(IsSettingsPage)); OnPropertyChanged(nameof(IsLogsPage));
         _settings.LastPage = CurrentPageKey;
         _ = _settingsService.SaveAsync(_settings);
-        if (ReferenceEquals(CurrentPage, Channels)) _ = Channels.EnsureInitializedAsync(_lifetime.Token);
         if (ReferenceEquals(CurrentPage, Commands)) _ = Commands.EnsureInitializedAsync(_lifetime.Token);
         if (ReferenceEquals(CurrentPage, Mirror)) _ = Settings.RefreshMirrorAsync();
     }
@@ -161,17 +189,28 @@ public sealed class MainViewModel : ObservableObject
         var ready = await _daemon.StartAsync(_settings, _lifetime.Token);
         _api.Connect(new Uri(ready.Address), _daemon.Token);
         _api.StartEventStream();
+        if (!string.IsNullOrWhiteSpace(_settings.CodexCustomPath))
+            await _api.ApplyCodexPathAsync(_settings.CodexCustomPath, "SavedPath", _lifetime.Token);
         await RefreshAsync();
-        if (Channels.IsContentReady) await Channels.RefreshAsync(_lifetime.Token, preserveOperationMessage: true);
+        await InitializeRemoteChannelsAsync(forceRetry: true);
         await Commands.RefreshAsync(_lifetime.Token);
+    }
+
+    private async Task InitializeRemoteChannelsAsync(bool forceRetry)
+    {
+        // The daemon creates its channel services before publishing its ready message.
+        // Load local secrets and configure/start those services only after API connection,
+        // then enable message mirroring so it cannot race channel initialization.
+        await Channels.EnsureInitializedAsync(_lifetime.Token, forceRetry).ConfigureAwait(false);
+        await Settings.InitializeMirrorAsync(_settings.MirrorAutoStart, _lifetime.Token).ConfigureAwait(false);
     }
 
     private void OnEventReceived(object? sender, BridgeEvent bridgeEvent)
     {
         QueueUiAction(() => Sessions.ApplyEvent(bridgeEvent));
-        if (bridgeEvent.EventType.StartsWith("channel.", StringComparison.OrdinalIgnoreCase) || bridgeEvent.EventType.StartsWith("binding.", StringComparison.OrdinalIgnoreCase) || bridgeEvent.EventType.StartsWith("telegram.", StringComparison.OrdinalIgnoreCase) || bridgeEvent.EventType.StartsWith("qq.", StringComparison.OrdinalIgnoreCase))
+        if (bridgeEvent.EventType.StartsWith("channel.", StringComparison.OrdinalIgnoreCase) || bridgeEvent.EventType.StartsWith("binding.", StringComparison.OrdinalIgnoreCase) || bridgeEvent.EventType.StartsWith("telegram.", StringComparison.OrdinalIgnoreCase) || bridgeEvent.EventType.StartsWith("qq.", StringComparison.OrdinalIgnoreCase) || bridgeEvent.EventType.StartsWith("qqbot.", StringComparison.OrdinalIgnoreCase))
             if (Channels.IsContentReady) QueueUiAction(() => Channels.ApplyEvent(bridgeEvent));
-        if (bridgeEvent.EventType is "codex.connected" or "codex.disconnected" or "error") { QueueUiTask(RefreshAsync); return; }
+        if (bridgeEvent.EventType is "codex.connected" or "codex.disconnected" or "codex.config_updated" or "error") { QueueUiTask(RefreshAsync); return; }
         if (bridgeEvent.EventType != "thread.updated") return;
         _eventRefresh?.Cancel(); _eventRefresh?.Dispose();
         _eventRefresh = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);

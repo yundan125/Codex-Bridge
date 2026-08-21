@@ -232,6 +232,7 @@ func (m *Manager) onTurnCompleted(threadID, turnID string, params map[string]any
 		return
 	}
 	m.flushDeltaForTurn(threadID, turnID)
+	m.logger.Printf("latency stage=turn_completed threadId=%s turnId=%s at=%s source=appserver", threadID, turnID, nowText())
 	state := m.RuntimeState(threadID)
 	if state.ThreadID == "" {
 		state.ThreadID = threadID
@@ -245,7 +246,7 @@ func (m *Manager) onTurnCompleted(threadID, turnID string, params map[string]any
 		state.Origin = ""
 		state.Error = ""
 		m.setState(state, true)
-		m.broker.PublishScoped(events.ThreadUpdated, threadID, turnID, "", map[string]any{"runtime": state, "source": "external-completed"})
+		m.broker.PublishScoped(events.ThreadUpdated, threadID, turnID, "", map[string]any{"runtime": state, "source": "appserver"})
 		return
 	}
 	status := strings.ToLower(statusText(firstNonNil(params["status"], nestedValue(params, "turn", "status"))))

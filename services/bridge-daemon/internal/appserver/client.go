@@ -111,7 +111,7 @@ func Detect(customPath string) Detection {
 }
 
 func detectedCLI(path string) Detection {
-	detection := Detection{Path: path, Available: true}
+	detection := Detection{Path: path}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	extension := strings.ToLower(filepath.Ext(path))
@@ -121,21 +121,29 @@ func detectedCLI(path string) Detection {
 		if comspec == "" {
 			comspec = "cmd.exe"
 		}
-		commandLine := fmt.Sprintf("\"\"%s\" --version\"", path)
-		command = exec.CommandContext(ctx, comspec, "/d", "/s", "/c", commandLine)
+		command = exec.CommandContext(ctx, comspec)
+		configureBatchCommand(command, fmt.Sprintf(`/d /s /c ""%s" --version"`, path))
 	} else {
 		command = exec.CommandContext(ctx, path, "--version")
 	}
-	if output, err := command.Output(); err == nil {
-		version := strings.TrimSpace(string(output))
-		if newline := strings.IndexAny(version, "\r\n"); newline >= 0 {
-			version = version[:newline]
-		}
-		if len(version) > 128 {
-			version = version[:128]
-		}
-		detection.Version = bridgelog.Redact(version)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		detection.Error = "Codex CLI failed --version validation"
+		return detection
 	}
+	version := strings.TrimSpace(string(output))
+	if newline := strings.IndexAny(version, "\r\n"); newline >= 0 {
+		version = version[:newline]
+	}
+	if len(version) > 128 {
+		version = version[:128]
+	}
+	if version == "" {
+		detection.Error = "Codex CLI returned an empty --version response"
+		return detection
+	}
+	detection.Available = true
+	detection.Version = bridgelog.Redact(version)
 	return detection
 }
 
@@ -501,8 +509,8 @@ func (c *Client) buildCommand() *exec.Cmd {
 		if comspec == "" {
 			comspec = "cmd.exe"
 		}
-		commandLine := fmt.Sprintf("\"\"%s\" app-server --listen stdio://\"", c.codexPath)
-		cmd = exec.Command(comspec, "/d", "/s", "/c", commandLine)
+		cmd = exec.Command(comspec)
+		configureBatchCommand(cmd, fmt.Sprintf(`/d /s /c ""%s" app-server --listen stdio://"`, c.codexPath))
 	} else {
 		cmd = exec.Command(c.codexPath, "app-server", "--listen", "stdio://")
 	}
@@ -557,13 +565,17 @@ func (c *Client) Close() error {
 		return nil
 	case <-time.After(1200 * time.Millisecond):
 	}
-	if err := terminateOwnedProcess(cmd); err != nil && !errors.Is(err, os.ErrProcessDone) {
-		return err
-	}
+	terminationErr := terminateOwnedProcess(cmd)
 	select {
 	case <-exit:
+		// The process can exit between taskkill's failed lookup and Process.Kill.
+		// In that case Windows may report ERROR_INVALID_PARAMETER even though the
+		// owned process has already shut down successfully.
+		return nil
 	case <-time.After(3 * time.Second):
+		if terminationErr != nil && !errors.Is(terminationErr, os.ErrProcessDone) {
+			return terminationErr
+		}
 		return errors.New("timed out waiting for owned Codex app-server to exit")
 	}
-	return nil
 }

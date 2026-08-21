@@ -42,6 +42,9 @@ type Status struct {
 	CodexCLIPath              string `json:"codexCliPath"`
 	CodexCLIVersion           string `json:"codexCliVersion,omitempty"`
 	CodexCLIAvailable         bool   `json:"codexCliAvailable"`
+	CodexCLIPathSource        string `json:"codexCliPathSource,omitempty"`
+	CodexCLIValidationStatus  string `json:"codexCliValidationStatus"`
+	CodexCLIConnectionStatus  string `json:"codexCliConnectionStatus"`
 	AppServerRunning          bool   `json:"appServerRunning"`
 	AppServerPID              int    `json:"appServerPid"`
 	LastError                 string `json:"lastError,omitempty"`
@@ -90,6 +93,9 @@ type Manager struct {
 	traces               map[string]*turnTrace
 	lastVerifications    map[string]control.PersistenceVerification
 	autoPersistenceProbe bool
+	configChanged        chan struct{}
+	configGeneration     uint64
+	connectionCancel     context.CancelFunc
 }
 
 func NewManager(version, listenAddress, codexPath, sandboxMode string, broker *events.Broker, logger *bridgelog.SafeLogger, registry *threadregistry.Registry) (*Manager, error) {
@@ -100,6 +106,18 @@ func NewManager(version, listenAddress, codexPath, sandboxMode string, broker *e
 		return nil, err
 	}
 	detection := appserver.Detect(codexPath)
+	pathSource := ""
+	validationStatus := "failed"
+	connectionStatus := "not-found"
+	if detection.Available {
+		validationStatus = "succeeded"
+		connectionStatus = "connecting"
+		if strings.TrimSpace(codexPath) == "" {
+			pathSource = "PATH"
+		} else {
+			pathSource = "SavedPath"
+		}
+	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		cwd = filepath.Dir(os.Args[0])
@@ -108,6 +126,7 @@ func NewManager(version, listenAddress, codexPath, sandboxMode string, broker *e
 	automaticPersistenceProbe := persistenceProbeSetting != "0" && persistenceProbeSetting != "false" && persistenceProbeSetting != "off"
 	status := Status{
 		Version: version, CodexCLIPath: detection.Path, CodexCLIVersion: detection.Version, CodexCLIAvailable: detection.Available,
+		CodexCLIPathSource: pathSource, CodexCLIValidationStatus: validationStatus, CodexCLIConnectionStatus: connectionStatus,
 		StartedAt: time.Now().UTC().Format(time.RFC3339), ListenAddress: listenAddress,
 		SandboxMode: string(parsedSandboxMode), ApprovalPolicy: string(security.ApprovalOnRequest),
 		DangerFullAccess: false, RemoteApproval: false,
@@ -124,6 +143,7 @@ func NewManager(version, listenAddress, codexPath, sandboxMode string, broker *e
 		deltas: make(map[string]*deltaBuffer), traces: make(map[string]*turnTrace),
 		lastVerifications:    make(map[string]control.PersistenceVerification),
 		autoPersistenceProbe: status.AutomaticPersistenceProbe,
+		configChanged:        make(chan struct{}, 1), configGeneration: 1,
 	}, nil
 }
 
@@ -134,25 +154,55 @@ func (m *Manager) Start() {
 }
 
 func (m *Manager) run() {
-	if !m.detection.Available {
-		m.logger.Printf("Codex CLI unavailable: %s", m.detection.Error)
-		m.broker.Publish(events.Error, map[string]any{"message": m.detection.Error})
-		return
-	}
 	for {
 		if m.ctx.Err() != nil {
 			return
 		}
-		client := appserver.NewClient(m.detection.Path, m.cwd, m.status.Version, m.logger, m.handleAppServerEvent)
+		detection, generation := m.connectionConfig()
+		if !detection.Available {
+			m.logger.Printf("Codex CLI unavailable: %s", detection.Error)
+			m.broker.Publish(events.Error, map[string]any{"message": detection.Error})
+			if !m.waitForConfigChange() {
+				return
+			}
+			continue
+		}
+
+		client := appserver.NewClient(detection.Path, m.cwd, m.status.Version, m.logger, m.handleAppServerEvent)
 		m.mu.Lock()
+		if generation != m.configGeneration {
+			m.mu.Unlock()
+			continue
+		}
 		m.client = client
+		m.status.AppServerRunning = false
+		m.status.AppServerPID = 0
+		if m.status.LastError == "" {
+			m.status.CodexCLIConnectionStatus = "connecting"
+		} else {
+			m.status.CodexCLIConnectionStatus = "reconnecting"
+		}
 		m.mu.Unlock()
 
 		startContext, cancel := context.WithTimeout(m.ctx, 20*time.Second)
+		m.mu.Lock()
+		if generation == m.configGeneration {
+			m.connectionCancel = cancel
+		}
+		m.mu.Unlock()
 		err := client.Start(startContext)
 		cancel()
+		m.mu.Lock()
+		if generation == m.configGeneration {
+			m.connectionCancel = nil
+		}
+		m.mu.Unlock()
 		if err != nil {
-			m.setDisconnected(err)
+			if !m.isCurrentGeneration(generation) {
+				m.clearClient(client)
+				continue
+			}
+			m.setDisconnected(generation, err, "reconnecting")
 			m.broker.Publish(events.Error, map[string]any{"message": bridgelog.Redact(err.Error())})
 			m.logger.Printf("Codex app-server connection failed: %v", err)
 			if !m.waitRetry(5 * time.Second) {
@@ -162,12 +212,22 @@ func (m *Manager) run() {
 		}
 
 		m.mu.Lock()
+		if generation != m.configGeneration {
+			m.mu.Unlock()
+			_ = client.Close()
+			continue
+		}
 		m.status.AppServerRunning = true
 		m.status.AppServerPID = client.PID()
 		m.status.LastError = ""
+		m.status.CodexCLIConnectionStatus = "connected"
 		m.mu.Unlock()
 		m.initializeThreadRegistry(client)
-		m.logger.Printf("Codex app-server connected (pid=%d, cliVersion=%s)", client.PID(), m.detection.Version)
+		if !m.isCurrentGeneration(generation) {
+			m.clearClient(client)
+			continue
+		}
+		m.logger.Printf("[codex-app-server] connected path=%s pid=%d cliVersion=%s", detection.Path, client.PID(), detection.Version)
 		m.broker.Publish(events.CodexConnected, map[string]any{"pid": client.PID()})
 
 		pollContext, stopPolling := context.WithCancel(m.ctx)
@@ -177,10 +237,14 @@ func (m *Manager) run() {
 		if m.ctx.Err() != nil {
 			return
 		}
+		if !m.isCurrentGeneration(generation) {
+			m.clearClient(client)
+			continue
+		}
 		if err == nil {
 			err = errors.New("Codex app-server disconnected")
 		}
-		m.setDisconnected(err)
+		m.setDisconnected(generation, err, "reconnecting")
 		m.markControlLost()
 		m.logger.Printf("Codex app-server disconnected: %v", err)
 		m.broker.Publish(events.CodexDisconnected, map[string]any{"message": bridgelog.Redact(err.Error())})
@@ -224,20 +288,56 @@ func (m *Manager) waitRetry(delay time.Duration) bool {
 	select {
 	case <-timer.C:
 		return true
+	case <-m.configChanged:
+		return true
 	case <-m.ctx.Done():
 		return false
 	}
 }
 
-func (m *Manager) setDisconnected(err error) {
+func (m *Manager) waitForConfigChange() bool {
+	select {
+	case <-m.configChanged:
+		return true
+	case <-m.ctx.Done():
+		return false
+	}
+}
+
+func (m *Manager) connectionConfig() (appserver.Detection, uint64) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.detection, m.configGeneration
+}
+
+func (m *Manager) isCurrentGeneration(generation uint64) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return generation == m.configGeneration
+}
+
+func (m *Manager) clearClient(client *appserver.Client) {
+	m.mu.Lock()
+	if m.client == client {
+		m.client = nil
+	}
+	m.mu.Unlock()
+}
+
+func (m *Manager) setDisconnected(generation uint64, err error, connectionStatus string) {
 	message := ""
 	if err != nil {
 		message = bridgelog.Redact(err.Error())
 	}
 	m.mu.Lock()
+	if generation != m.configGeneration {
+		m.mu.Unlock()
+		return
+	}
 	m.status.AppServerRunning = false
 	m.status.AppServerPID = 0
 	m.status.LastError = message
+	m.status.CodexCLIConnectionStatus = connectionStatus
 	m.mu.Unlock()
 }
 
@@ -374,6 +474,73 @@ func (m *Manager) Status() Status {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.status
+}
+
+func (m *Manager) ApplyCodexPath(path, source string) (Status, error) {
+	detection := appserver.Detect(strings.TrimSpace(path))
+	if !detection.Available {
+		m.logger.Printf("[codex-discovery] validation failed path=%s error=%s", detection.Path, detection.Error)
+		return m.Status(), errors.New(detection.Error)
+	}
+	source = normalizeCodexPathSource(source)
+
+	m.mu.Lock()
+	pathChanged := !m.detection.Available || !samePath(m.detection.Path, detection.Path)
+	m.codexPath = detection.Path
+	m.detection = detection
+	m.status.CodexCLIPath = detection.Path
+	m.status.CodexCLIVersion = detection.Version
+	m.status.CodexCLIAvailable = true
+	m.status.CodexCLIPathSource = source
+	m.status.CodexCLIValidationStatus = "succeeded"
+	m.status.LastError = ""
+	client := m.client
+	cancel := m.connectionCancel
+	reconnectRequested := pathChanged || !m.status.AppServerRunning
+	if pathChanged {
+		m.configGeneration++
+		m.status.AppServerRunning = false
+		m.status.AppServerPID = 0
+		if client == nil {
+			m.status.CodexCLIConnectionStatus = "connecting"
+		} else {
+			m.status.CodexCLIConnectionStatus = "reconnecting"
+		}
+	}
+	status := m.status
+	m.mu.Unlock()
+
+	m.logger.Printf("[codex-daemon] applying new Codex path path=%s source=%s", detection.Path, source)
+	m.logger.Printf("[codex-config] runtime path updated path=%s source=%s", detection.Path, source)
+	if reconnectRequested {
+		m.logger.Printf("[codex-app-server] reconnecting with discovered path path=%s", detection.Path)
+		select {
+		case m.configChanged <- struct{}{}:
+		default:
+		}
+	}
+	if pathChanged {
+		if cancel != nil {
+			cancel()
+		}
+		if client != nil {
+			if err := client.Close(); err != nil {
+				m.logger.Printf("close previous Codex app-server during path update: %v", err)
+			}
+		}
+		m.markControlLost()
+	}
+	m.broker.Publish(events.CodexConfigUpdated, map[string]any{"path": detection.Path, "source": source})
+	return status, nil
+}
+
+func normalizeCodexPathSource(source string) string {
+	switch strings.TrimSpace(source) {
+	case "SavedPath", "PATH", "RunningCodex", "RunningChatGPT", "Manual":
+		return strings.TrimSpace(source)
+	default:
+		return "Manual"
+	}
 }
 
 func (m *Manager) SetSandboxMode(mode string) (Status, error) {

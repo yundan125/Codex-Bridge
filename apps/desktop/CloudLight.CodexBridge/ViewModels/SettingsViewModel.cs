@@ -13,8 +13,13 @@ public sealed class SettingsViewModel : ObservableObject
     private readonly UserSettings _settings;
     private readonly LogService _logs;
     private readonly StartupService _startup;
+	private readonly SemaphoreSlim _mirrorOperationLock = new(1, 1);
     private string _codexCustomPath;
     private string _sandboxMode;
+    private string _runtimeCodexPath = "";
+    private string _codexPathSource = "";
+    private string _codexValidationStatus = "pending";
+    private string _codexConnectionStatus = "waiting";
     private string _codexDetection = "等待后端检测";
     private string _backendStatus = "正在启动";
     private string _saveResult = "";
@@ -108,6 +113,32 @@ public sealed class SettingsViewModel : ObservableObject
         private set => SetProperty(ref _codexDetection, value);
     }
 
+    public string CodexPathSource { get => _codexPathSource; private set => SetProperty(ref _codexPathSource, value); }
+    public string CodexValidationStatus { get => _codexValidationStatus; private set => SetProperty(ref _codexValidationStatus, value); }
+    public string CodexConnectionStatus { get => _codexConnectionStatus; private set => SetProperty(ref _codexConnectionStatus, value); }
+    public string CodexCliPath { get => _runtimeCodexPath; private set => SetProperty(ref _runtimeCodexPath, value); }
+
+    public void UpdateDiscovery(CodexDiscoveryResult discovery)
+    {
+        if (discovery.Found)
+        {
+            _settings.CodexCustomPath = discovery.Path;
+            CodexCustomPath = discovery.Path;
+            CodexCliPath = discovery.Path;
+            CodexPathSource = discovery.RuntimeSource;
+            CodexValidationStatus = "succeeded";
+            CodexConnectionStatus = "waiting";
+        }
+        else
+        {
+            CodexCliPath = "";
+            CodexPathSource = "";
+            CodexValidationStatus = "failed";
+            CodexConnectionStatus = "not-found";
+        }
+        RebuildCodexDetection();
+    }
+
     public string BackendStatus
     {
         get => _backendStatus;
@@ -146,10 +177,40 @@ public sealed class SettingsViewModel : ObservableObject
 	public string MirrorStatusText { get=>_mirrorStatusText; private set=>SetProperty(ref _mirrorStatusText,value); }
 	public string QqCapabilityNotice { get=>_qqCapabilityNotice; private set=>SetProperty(ref _qqCapabilityNotice,value); }
 
-	public async Task RefreshMirrorAsync()
+	public Task RefreshMirrorAsync(CancellationToken cancellationToken = default) =>
+		LoadMirrorAsync(autoStart: false, cancellationToken);
+
+	public Task InitializeMirrorAsync(bool autoStart, CancellationToken cancellationToken = default) =>
+		LoadMirrorAsync(autoStart, cancellationToken);
+
+	private async Task LoadMirrorAsync(bool autoStart, CancellationToken cancellationToken)
 	{
-		try { ApplyMirrorStatus(await _api.GetMirrorAsync()); }
-		catch (Exception exception) { MirrorStatusText = UiText.UserError(exception, "读取同步状态"); }
+		try
+		{
+			await _mirrorOperationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+			try
+			{
+				var status = await _api.GetMirrorAsync(cancellationToken).ConfigureAwait(false);
+				if (autoStart && !status.Config.Enabled)
+				{
+					status.Config.Enabled = true;
+					status = await _api.ConfigureMirrorAsync(status.Config, cancellationToken).ConfigureAwait(false);
+				}
+				await RunOnUiAsync(() => ApplyMirrorStatus(status));
+			}
+			finally
+			{
+				_mirrorOperationLock.Release();
+			}
+		}
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+		{
+		}
+		catch (Exception exception)
+		{
+			_logs.AddException("desktop", "初始化消息同步失败。", exception);
+			await RunOnUiAsync(() => MirrorStatusText = UiText.UserError(exception, "读取同步状态"));
+		}
 	}
 
 	private void ApplyMirrorStatus(MirrorStatus status)
@@ -182,13 +243,47 @@ public sealed class SettingsViewModel : ObservableObject
     public void UpdateRuntimeStatus(BridgeStatus status, string backendStatus)
     {
         BackendStatus = backendStatus;
-        CodexDetection = status.CodexCliAvailable
-            ? string.IsNullOrWhiteSpace(status.CodexCliVersion)
-                ? status.CodexCliPath
-                : $"{status.CodexCliPath} ({status.CodexCliVersion})"
-            : "未找到 Codex。请确认已安装，或手动选择程序路径。";
+        CodexCliPath = status.CodexCliPath;
+        if (!string.IsNullOrWhiteSpace(status.CodexCliPathSource)) CodexPathSource = status.CodexCliPathSource;
+        CodexValidationStatus = string.IsNullOrWhiteSpace(status.CodexCliValidationStatus)
+            ? status.CodexCliAvailable ? "succeeded" : "failed"
+            : status.CodexCliValidationStatus;
+        CodexConnectionStatus = string.IsNullOrWhiteSpace(status.CodexCliConnectionStatus)
+            ? status.AppServerRunning ? "connected" : status.CodexCliAvailable ? "connecting" : "not-found"
+            : status.CodexCliConnectionStatus;
+        RebuildCodexDetection(status.CodexCliVersion);
         SandboxMode = status.SandboxMode;
         ApprovalPolicy = status.ApprovalPolicy;
+    }
+
+    private void RebuildCodexDetection(string version = "")
+    {
+        if (string.IsNullOrWhiteSpace(CodexCliPath))
+        {
+            CodexDetection = "未找到 Codex。请确认已安装，或手动选择程序路径。";
+            return;
+        }
+        var source = CodexPathSource switch
+        {
+            "RunningChatGPT" => "正在运行的 ChatGPT",
+            "RunningCodex" => "正在运行的 Codex",
+            "SavedPath" => "已保存路径",
+            "PATH" => "系统 PATH",
+            "Manual" => "手动设置",
+            _ => string.IsNullOrWhiteSpace(CodexPathSource) ? "未知" : CodexPathSource
+        };
+        var validation = CodexValidationStatus == "succeeded" ? "已通过" : CodexValidationStatus == "failed" ? "失败" : "验证中";
+        var connection = CodexConnectionStatus switch
+        {
+            "connected" => "已连接",
+            "reconnecting" => "正在重新连接",
+            "connecting" => "正在连接",
+            "not-found" => "未找到",
+            "disconnected" => "未连接",
+            _ => "等待 daemon"
+        };
+        var versionText = string.IsNullOrWhiteSpace(version) ? "" : $"\n版本：{version}";
+        CodexDetection = $"路径：{CodexCliPath}\n来源：{source}\n验证：{validation}\n连接：{connection}{versionText}";
     }
 
     private async Task SaveAsync()
@@ -206,17 +301,24 @@ public sealed class SettingsViewModel : ObservableObject
         try { _startup.Configure(StartWithWindows, SilentStartup); }
         catch (Exception exception) { SaveResult = $"启动项更新失败：{exception.Message}"; return; }
         await _service.SaveAsync(_settings);
+        _logs.Add("codex-config", $"[codex-config] persisted path={_settings.CodexCustomPath}");
         try
         {
+            if (!string.IsNullOrWhiteSpace(_settings.CodexCustomPath))
+            {
+                var codexStatus = await _api.ApplyCodexPathAsync(_settings.CodexCustomPath, "Manual");
+                UpdateRuntimeStatus(codexStatus, BackendStatus);
+                _logs.Add("codex-config", $"[codex-config] runtime path updated path={codexStatus.CodexCliPath} target=daemon");
+            }
 			var mirror = await _api.ConfigureMirrorAsync(new MirrorConfig { Enabled=MirrorEnabled,RequireThreadNumber=RequireThreadNumber,Telegram=new TelegramMirrorConfig{Enabled=TelegramMirrorEnabled,ChatId=TelegramMirrorChatId.Trim()},Qq=new QqMirrorConfig{Enabled=QqMirrorEnabled,ConversationType=QqMirrorConversationType,OpenId=QqMirrorOpenId.Trim()},Messages=new MirrorMessageTypes{User=false,Assistant=MirrorAssistant,Status=false,RequestUserInput=MirrorInput,Error=MirrorError} });
 			ApplyMirrorStatus(mirror);
             var status = await _api.UpdateSecurityAsync(_settings.SandboxMode);
             ApprovalPolicy = status.ApprovalPolicy;
-            SaveResult = "设置已保存。文件访问范围会应用到后续新任务，Codex 程序路径将在下次启动时生效。";
+            SaveResult = "设置已保存，Codex 程序路径已立即应用到当前运行时。";
         }
         catch (Exception exception)
         {
-            SaveResult = "设置已保存，本地服务暂不可用；更改将在下次启动时生效。";
+            SaveResult = "设置已保存，但当前运行时应用失败；请查看日志后重试。";
             _logs.AddException("desktop", "应用设置时本地服务不可用。", exception);
         }
         _logs.Add("desktop", "用户设置已保存（未记录凭据或消息正文）。");
@@ -229,4 +331,15 @@ public sealed class SettingsViewModel : ObservableObject
         info.ArgumentList.Add(path);
         Process.Start(info);
     }
+
+	private static Task RunOnUiAsync(Action action)
+	{
+		var dispatcher = Application.Current?.Dispatcher;
+		if (dispatcher is null || dispatcher.CheckAccess())
+		{
+			action();
+			return Task.CompletedTask;
+		}
+		return dispatcher.InvokeAsync(action).Task;
+	}
 }

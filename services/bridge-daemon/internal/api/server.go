@@ -60,6 +60,7 @@ func New(token string, runtimeManager *bridgeruntime.Manager, controlService *co
 	mux.HandleFunc("POST /api/v1/bindings", server.authorized(server.createBinding))
 	mux.HandleFunc("DELETE /api/v1/bindings/{bindingId}", server.authorized(server.deleteBinding))
 	mux.HandleFunc("PUT /api/v1/settings/security", server.authorized(server.updateSecurity))
+	mux.HandleFunc("PUT /api/v1/settings/codex", server.authorized(server.updateCodex))
 	mux.HandleFunc("GET /api/v1/commands", server.authorized(server.commandList))
 	mux.HandleFunc("POST /api/v1/commands", server.authorized(server.commandCreate))
 	mux.HandleFunc("PUT /api/v1/commands/{id}", server.authorized(server.commandUpdate))
@@ -518,6 +519,26 @@ func (s *Server) updateSecurity(response http.ResponseWriter, request *http.Requ
 	status, err := s.runtime.SetSandboxMode(input.SandboxMode)
 	if err != nil {
 		writeError(response, http.StatusBadRequest, "invalid_sandbox", "沙盒模式只允许 read-only 或 workspace-write")
+		return
+	}
+	writeJSON(response, http.StatusOK, status)
+}
+
+func (s *Server) updateCodex(response http.ResponseWriter, request *http.Request) {
+	var input struct {
+		Path   string `json:"path"`
+		Source string `json:"source"`
+	}
+	if !decodeBody(response, request, 16*1024, &input) {
+		return
+	}
+	if strings.TrimSpace(input.Path) == "" {
+		writeError(response, http.StatusBadRequest, "invalid_codex_path", "Codex path must not be empty")
+		return
+	}
+	status, err := s.runtime.ApplyCodexPath(input.Path, input.Source)
+	if err != nil {
+		writeError(response, http.StatusUnprocessableEntity, "invalid_codex_path", bridgelog.Redact(err.Error()))
 		return
 	}
 	writeJSON(response, http.StatusOK, status)

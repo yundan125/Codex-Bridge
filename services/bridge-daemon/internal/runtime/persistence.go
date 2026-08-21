@@ -28,12 +28,14 @@ type fileSnapshot struct {
 }
 
 var completedPersistenceRetryDelays = []time.Duration{
-	750 * time.Millisecond,
-	1500 * time.Millisecond,
-	2500 * time.Millisecond,
+	1 * time.Second,
+	2 * time.Second,
+	3 * time.Second,
+	5 * time.Second,
+	10 * time.Second,
 }
 
-const completedPersistenceInitialDelay = 500 * time.Millisecond
+const completedPersistenceInitialDelay = 0
 
 type turnTrace struct {
 	mu sync.Mutex
@@ -367,7 +369,7 @@ func (m *Manager) verifyCompletedTurn(threadID, turnID string, trace *turnTrace)
 		return
 	}
 	defer trace.finishVerification()
-	ctx, cancel := context.WithTimeout(m.ctx, 35*time.Second)
+	ctx, cancel := context.WithTimeout(m.ctx, 30*time.Second)
 	defer cancel()
 	if !waitForPersistenceWindow(ctx, completedPersistenceInitialDelay) {
 		m.completePersistenceFailure(threadID, turnID, "persistence verification was cancelled before the write window elapsed", nil)
@@ -389,13 +391,16 @@ func (m *Manager) verifyCompletedTurn(threadID, turnID string, trace *turnTrace)
 		} else {
 			mainSnapshot := persistenceSnapshot(raw, turnID)
 			m.logRPCThread(fmt.Sprintf("thread/read-after-completed-attempt-%d", attempt+1), threadID, mainSnapshot)
-			if !m.autoPersistenceProbe {
-				verification := m.completedWithoutProbe(threadID, turnID, mainSnapshot, before, startedAt, warnings, persistenceError)
+			verification := m.completedWithoutProbe(threadID, turnID, mainSnapshot, before, startedAt, warnings, persistenceError)
+			if verification.Status == StatePersisted {
+				m.logger.Printf("latency stage=final_resolved threadId=%s turnId=%s at=%s source=retry", threadID, turnID, nowText())
 				m.saveVerification(verification)
 				m.applyVerificationState(verification)
+				if m.autoPersistenceProbe {
+					go m.probeCompletedTurnDiagnostic(threadID, turnID, mainSnapshot, before, startedAt, warnings, persistenceError)
+				}
 				return
 			}
-			verification, _ := m.verifySnapshots(ctx, threadID, turnID, mainSnapshot, before, startedAt, warnings, persistenceError)
 			lastVerification = &verification
 			if verification.Status == StatePersisted || !persistenceVerificationRetryable(threadID, mainSnapshot, verification) {
 				m.saveVerification(verification)
@@ -414,6 +419,17 @@ func (m *Manager) verifyCompletedTurn(threadID, turnID string, trace *turnTrace)
 		return
 	}
 	m.completePersistenceFailure(threadID, turnID, fmt.Sprintf("completed thread/read failed after finite retries: %v", lastReadError), nil)
+}
+
+func (m *Manager) probeCompletedTurnDiagnostic(threadID, turnID string, main control.ThreadPersistenceSnapshot, before fileSnapshot, startedAt time.Time, warnings []string, persistenceError bool) {
+	ctx, cancel := context.WithTimeout(m.ctx, 20*time.Second)
+	defer cancel()
+	verification, err := m.verifySnapshots(ctx, threadID, turnID, main, before, startedAt, warnings, persistenceError)
+	result := verification.Status
+	if err != nil {
+		result = "diagnostic-failed"
+	}
+	m.logger.Printf("persistenceProbeDiagnostic selectedThreadId=%s expectedTurnId=%s result=%s", threadID, turnID, result)
 }
 
 func waitForPersistenceWindow(ctx context.Context, delay time.Duration) bool {
@@ -447,7 +463,7 @@ func (m *Manager) completedWithoutProbe(
 ) control.PersistenceVerification {
 	verification := control.PersistenceVerification{
 		ThreadID: threadID, ExpectedTurnID: turnID, Status: StateCompletedUnverified,
-		Message: "Turn 已完成，但尚未由新的独立 App Server 验证；请使用“重新验证当前 Thread 持久化”。",
+		Message: "Turn 已完成，正在等待主 App Server 返回正式 assistant message。",
 		Main:    mainSnapshot, Warnings: append([]string(nil), warnings...),
 		Environment: m.codexEnvironment(threadID), VerifiedAt: nowText(),
 	}
@@ -470,8 +486,12 @@ func (m *Manager) completedWithoutProbe(
 	case mainSnapshot.AssistantMessageItemID == "":
 		verification.Status = StatePersistenceFailed
 		verification.Message = "持久化失败：完成后的 thread/read 尚未包含正式 assistant message。"
-	case persistenceError:
-		verification.Message = "Turn 已完成且主 App Server 已读取到正式消息；stderr 有未独立证实的持久化警告，等待独立验证。"
+	default:
+		verification.Status = StatePersisted
+		verification.Message = fmt.Sprintf("已确认：主 App Server 已读取到 Turn %s 的正式 assistant message；独立 probe 不阻塞 Mirror。", turnID)
+		if persistenceError {
+			verification.Message += " stderr 持久化警告保留用于诊断。"
+		}
 	}
 	return verification
 }
@@ -494,7 +514,9 @@ func (m *Manager) verifySnapshots(
 		expectedTurnID, mainSnapshot.UserMessageItemID, mainSnapshot.AssistantMessageItemID)
 	m.logRolloutVerification(threadID, expectedTurnID, verification.Rollout)
 
-	probeResult, probeErr := appserver.ProbeThread(ctx, m.detection.Path, m.cwd, m.status.Version, threadID, m.logger)
+	detection, _ := m.connectionConfig()
+	status := m.Status()
+	probeResult, probeErr := appserver.ProbeThread(ctx, detection.Path, m.cwd, status.Version, threadID, m.logger)
 	if probeErr == nil {
 		verification.Probe = persistenceSnapshot(probeResult.Raw, expectedTurnID)
 	}
@@ -598,7 +620,11 @@ func completedNotificationState(status string) string {
 }
 
 func (m *Manager) applyVerificationState(verification control.PersistenceVerification) {
-	state := m.RuntimeState(verification.ThreadID)
+	current := m.RuntimeState(verification.ThreadID)
+	if current.TurnID == verification.ExpectedTurnID && current.State == StatePersisted && verification.Status == StatePersisted {
+		return
+	}
+	state := current
 	state.ThreadID = verification.ThreadID
 	state.TurnID = verification.ExpectedTurnID
 	state.State = verification.Status
@@ -792,12 +818,13 @@ func fileContainsAny(path string, identifiers ...string) (bool, error) {
 
 func (m *Manager) codexEnvironment(threadID string) control.CodexEnvironment {
 	probeEnvironment := appserver.ProbeEnvironmentSnapshot()
+	status := m.Status()
 	username := strings.TrimSpace(os.Getenv("USERNAME"))
 	if current, err := user.Current(); err == nil && strings.TrimSpace(current.Username) != "" {
 		username = current.Username
 	}
 	environment := control.CodexEnvironment{
-		CodexCLIPath: m.detection.Path, CodexCLIVersion: m.detection.Version,
+		CodexCLIPath: status.CodexCLIPath, CodexCLIVersion: status.CodexCLIVersion,
 		Username: username, UserProfile: probeEnvironment.UserProfile, Home: probeEnvironment.Home,
 		CodexHomeExplicit: probeEnvironment.CodexHomeExplicit, CodexHome: probeEnvironment.CodexHome,
 		ResolvedCodexDataRoot:     probeEnvironment.ResolvedCodexDataRoot,

@@ -3,6 +3,7 @@ package mirror
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -46,15 +47,19 @@ func (fakeRuntime) RuntimeState(id string) control.RuntimeState {
 }
 
 type sendRecorder struct {
-	mu   sync.Mutex
-	sent []string
-	fail bool
+	mu    sync.Mutex
+	sent  []string
+	fail  bool
+	delay time.Duration
 }
 
 func (r *sendRecorder) target() Target {
 	return Target{
 		Status: func() (string, bool) { return "account", true },
 		Send: func(_ context.Context, message channels.OutboundMessage) (channels.OutboundResult, error) {
+			if r.delay > 0 {
+				time.Sleep(r.delay)
+			}
 			r.mu.Lock()
 			defer r.mu.Unlock()
 			if r.fail {
@@ -63,6 +68,47 @@ func (r *sendRecorder) target() Target {
 			r.sent = append(r.sent, message.Text)
 			return channels.OutboundResult{MessageID: "ok"}, nil
 		},
+	}
+}
+
+func TestRolloutFallbackRequiresTaskCompleteAndSkipsCommentary(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rollout-test.jsonl")
+	lines := []string{
+		`{"timestamp":"2026-01-01T00:00:00Z","type":"session_meta","payload":{"id":"thread"}}`,
+		`{"timestamp":"2026-01-01T00:00:01Z","type":"response_item","payload":{"type":"message","role":"assistant","phase":"commentary","id":"comment","content":[{"type":"output_text","text":"do not send"}],"internal_chat_message_metadata_passthrough":{"turn_id":"turn-1"}}}`,
+		`{"timestamp":"2026-01-01T00:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","phase":"final_answer","id":"final","content":[{"type":"output_text","text":"LOW-LATENCY-TEST"}],"internal_chat_message_metadata_passthrough":{"turn_id":"turn-1"}}}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := readCompletedRolloutFinal(path); ok {
+		t.Fatal("final must not be accepted before task_complete")
+	}
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = file.WriteString(`{"timestamp":"2026-01-01T00:00:03Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-1"}}` + "\n")
+	_ = file.Close()
+	final, ok := readCompletedRolloutFinal(path)
+	if !ok || final.Text != "LOW-LATENCY-TEST" || final.ItemID != "final" {
+		t.Fatalf("unexpected fallback: %#v ok=%t", final, ok)
+	}
+}
+
+func TestFinalPlatformsSendInParallel(t *testing.T) {
+	dir := t.TempDir()
+	tg, qq := &sendRecorder{delay: 250 * time.Millisecond}, &sendRecorder{delay: 250 * time.Millisecond}
+	service, reader, _, _ := newFixture(t, filepath.Join(dir, "mirror.json"), tg, qq)
+	defer service.Close()
+	reader.setTurns(completedTurn("turn-1", "assistant-1", "answer"))
+	started := time.Now()
+	service.syncThread("thread")
+	if elapsed := time.Since(started); elapsed >= 450*time.Millisecond {
+		t.Fatalf("platform sends were serialized: %s", elapsed)
+	}
+	if tg.count() != 1 || qq.count() != 1 {
+		t.Fatalf("delivery count telegram=%d qq=%d", tg.count(), qq.count())
 	}
 }
 
