@@ -24,6 +24,7 @@ public partial class App : Application
     private bool _shutdownInProgress;
     private bool _exitRequested;
     private bool _trayNoticeShown;
+    private int _showMainWindowPending;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
@@ -51,7 +52,7 @@ public partial class App : Application
         var logsViewModel = new LogsViewModel(logs, settingsService.LogDirectory);
         var overview = new OverviewViewModel(sessions, channels, settingsViewModel);
         var mirror = new MirrorViewModel(settingsViewModel);
-        var backup = new BackupViewModel(new BackupService(settingsService), logs);
+        var backup = new BackupViewModel(new BackupService(settingsService, logs: logs), logs);
         _mainViewModel = new MainViewModel(daemon, api, sessions, channels, commands, overview, mirror, backup,
             settingsViewModel, logsViewModel, settings, settingsService, logs);
         backup.StopRuntimeAsync = _mainViewModel.PauseRuntimeAsync;
@@ -167,8 +168,10 @@ public partial class App : Application
         }
         else icon = SystemIcons.Application;
         _trayIcon = new Forms.NotifyIcon { Text = "CloudLight Codex Bridge", Icon = icon, Visible = true, ContextMenuStrip = menu };
-        _trayIcon.DoubleClick += (_, _) => ShowMainWindow();
-        _trayIcon.Click += (_, args) => { if (args is Forms.MouseEventArgs mouse && mouse.Button == Forms.MouseButtons.Left) ShowMainWindow(); };
+        _trayIcon.MouseClick += (_, args) =>
+        {
+            if (args.Button == Forms.MouseButtons.Left) ShowMainWindow();
+        };
     }
 
     private void UpdateTrayStatus()
@@ -178,15 +181,35 @@ public partial class App : Application
 
     private void ShowMainWindow()
     {
-        if (MainWindow is null) return;
-        MainWindow.Show();
-        if (MainWindow.WindowState == WindowState.Minimized) MainWindow.WindowState = WindowState.Normal;
-        MainWindow.Activate();
-        MainWindow.Topmost = true;
-        MainWindow.Topmost = false;
-        MainWindow.Focus();
-    }
+        if (_shutdownInProgress || _exitRequested || MainWindow is null) return;
+        if (System.Threading.Interlocked.Exchange(ref _showMainWindowPending, 1) != 0) return;
 
+        try
+        {
+            _ = Dispatcher.BeginInvoke(DispatcherPriority.Normal, new Action(() =>
+            {
+                try
+                {
+                    if (_shutdownInProgress || _exitRequested || MainWindow is null) return;
+
+                    var window = MainWindow;
+                    if (!window.IsVisible) window.Show();
+                    if (window.WindowState == WindowState.Minimized) window.WindowState = WindowState.Normal;
+                    window.Activate();
+                    window.Focus();
+                }
+                finally
+                {
+                    System.Threading.Interlocked.Exchange(ref _showMainWindowPending, 0);
+                }
+            }));
+        }
+        catch
+        {
+            System.Threading.Interlocked.Exchange(ref _showMainWindowPending, 0);
+            throw;
+        }
+    }
     private async void OnMainWindowClosing(object? sender, CancelEventArgs e)
     {
         if (_exitRequested) return;

@@ -70,8 +70,7 @@ public sealed class BackupViewModel : ObservableObject
             OnPropertyChanged(nameof(BackupDetailsVisibility));
         }
     }
-    public string BackupDetails => SelectedManifest is null ? "" :
-        $"备份时间  {SelectedManifest.CreatedAt.ToLocalTime():yyyy-MM-dd HH:mm}\n应用版本  {SelectedManifest.AppVersion}\nCodex 版本  {ValueOrDash(SelectedManifest.CodexVersion)}\n包含内容  {(SelectedManifest.IncludedCodex ? "Codex " : "")}{(SelectedManifest.IncludedBridge ? "应用数据" : "")}\n文件数量  {SelectedManifest.FileCount:N0}\n总大小  {FormatSize(SelectedManifest.TotalSize)}";
+    public string BackupDetails => SelectedManifest is null ? "" : BuildBackupDetails(SelectedManifest);
     public Visibility BackupDetailsVisibility => SelectedManifest is null ? Visibility.Collapsed : Visibility.Visible;
     public string OperationText { get => _operationText; private set => SetProperty(ref _operationText, value); }
     public string ProgressStage { get => _progressStage; private set => SetProperty(ref _progressStage, value); }
@@ -106,9 +105,9 @@ public sealed class BackupViewModel : ObservableObject
         try
         {
             var result = await _service.CreateBackupAsync(dialog.FileName, IncludeCodex, IncludeBridge, CreateProgress(), _backupCancellation.Token);
-            OperationText = result.IsComplete
-                ? $"完整备份成功：{result.Manifest.FileCount:N0} 个文件，{FormatSize(result.Manifest.TotalSize)}。"
-                : $"备份完成，但有 {result.Manifest.Failures.Count} 个文件未能读取：{string.Join("；", result.Manifest.Failures.Take(5).Select(item => item.RelativePath))}";
+            OperationText = result.HasWarnings
+                ? $"备份完成（有警告）：成功保存 {result.Manifest.FileCount:N0} 个文件；{result.Manifest.Failures.Count} 个文件未保存，仍可恢复 {result.Manifest.Modules.Count(module => module.CanRestore)} 个数据模块。"
+                : $"备份成功：{result.Manifest.FileCount:N0} 个文件，{FormatSize(result.Manifest.TotalSize)}。";
             AddRecent(OperationText);
         }
         catch (OperationCanceledException) { OperationText = "备份已取消，未保留未完成文件。"; }
@@ -127,13 +126,15 @@ public sealed class BackupViewModel : ObservableObject
             SelectedBackup = dialog.FileName;
             RestoreCodex = SelectedManifest.IncludedCodex;
             RestoreBridge = SelectedManifest.IncludedBridge;
-            OperationText = "备份完整性验证通过，可以开始恢复。";
+            OperationText = SelectedManifest.Status == BackupStatuses.Complete
+                ? "备份验证完成，可以开始恢复。"
+                : $"该备份包含可恢复数据，但有 {SelectedManifest.Failures.Count + SelectedManifest.ValidationIssues.Count} 项警告；恢复时会跳过无效项并继续恢复其他模块。";
         }
         catch (Exception exception)
         {
             SelectedManifest = null;
             SelectedBackup = "";
-            OperationText = "备份文件损坏或不完整，无法恢复。详情已写入运行日志。";
+            OperationText = $"备份无法安全识别，未进入恢复流程：{UiText.UserError(exception, "读取备份")}";
             _logs.AddException("backup", "读取备份文件失败。", exception);
         }
         finally { Busy = false; }
@@ -157,7 +158,13 @@ public sealed class BackupViewModel : ObservableObject
                 PreRestoreDirectory = preRestoreDirectory
             }, StopRuntimeAsync, RestartRuntimeAsync, CreateProgress());
             if (RefreshThreadsAsync is not null) await RefreshThreadsAsync();
-            OperationText = $"恢复完成：{result.RestoredFiles:N0} 个文件。恢复前备份：{result.PreRestoreBackupPath}";
+            var succeeded = string.Join("、", result.SucceededModules.Select(BackupService.GetModuleDisplayName));
+            var failed = string.Join("、", result.FailedModules.Select(BackupService.GetModuleDisplayName));
+            var warningDetails = string.Join("；", result.Warnings.Take(5).Select(warning =>
+                $"{BackupService.GetModuleDisplayName(warning.Module)}：{ValueOrDash(warning.RelativePath)} — {warning.Error}"));
+            OperationText = result.IsPartial
+                ? $"恢复完成（有警告）：成功 {succeeded}；未恢复 {ValueOrDash(failed)}；共恢复 {result.RestoredFiles:N0} 个文件，{result.Warnings.Count} 项警告。{warningDetails}。恢复前备份：{result.PreRestoreBackupPath}"
+                : $"完整恢复成功：{succeeded}，共 {result.RestoredFiles:N0} 个文件。恢复前备份：{result.PreRestoreBackupPath}";
             AddRecent(OperationText);
         }
         catch (Exception exception) { OperationText = UiText.UserError(exception, "恢复备份"); _logs.AddException("backup", "完整恢复失败。", exception); }
@@ -170,6 +177,40 @@ public sealed class BackupViewModel : ObservableObject
         ProgressPercent = value.Percent;
     });
     private void AddRecent(string text) { RecentOperations.Insert(0, $"{DateTime.Now:HH:mm:ss}  {text}"); while (RecentOperations.Count > 10) RecentOperations.RemoveAt(RecentOperations.Count - 1); }
+    private static string BuildBackupDetails(BackupManifest manifest)
+    {
+        var status = manifest.Status switch
+        {
+            BackupStatuses.Complete => "可恢复，完整",
+            BackupStatuses.CompleteWithWarnings => "可恢复，有警告",
+            _ => manifest.CanRestore ? "可部分恢复" : "无法恢复"
+        };
+        var modules = manifest.Modules.Count == 0
+            ? "—"
+            : string.Join("\n", manifest.Modules.Select(module =>
+                $"- {module.DisplayName}：{(module.Status == "Complete" ? "完整" : module.CanRestore ? "可部分恢复" : "不可用")}（{module.ValidFileCount} 个有效文件）"));
+        var missing = manifest.Failures.Concat(manifest.ValidationIssues.Select(issue => new BackupFailure
+            {
+                RelativePath = issue.RelativePath,
+                Module = issue.Module,
+                Error = issue.Error
+            })).ToList();
+        var missingText = missing.Count == 0
+            ? "无"
+            : string.Join("\n", missing.Take(20).Select(item => $"- {BackupService.GetModuleDisplayName(item.Module)}：{item.RelativePath} — {item.Error}")) +
+              (missing.Count > 20 ? $"\n- 另有 {missing.Count - 20} 项，详见运行日志" : "");
+        return $"备份时间  {manifest.CreatedAt.ToLocalTime():yyyy-MM-dd HH:mm}\n" +
+               $"应用版本  {manifest.AppVersion}\n" +
+               $"备份格式  v{manifest.FormatVersion}\n" +
+               $"Codex 版本  {ValueOrDash(manifest.CodexVersion)}\n" +
+               $"总体状态  {status}\n" +
+               $"是否可恢复  {(manifest.CanRestore ? "是" : "否")}\n" +
+               $"文件数量  {manifest.FileCount:N0}\n" +
+               $"总大小  {FormatSize(manifest.TotalSize)}\n" +
+               $"已排除运行时数据  {manifest.ExcludedRuntimeFiles.Count:N0} 项\n\n" +
+               $"可恢复数据项\n{modules}\n\n" +
+               $"缺失或无效项\n{missingText}";
+    }
     private static string ValueOrDash(string value) => string.IsNullOrWhiteSpace(value) ? "—" : value;
     public static string FormatSize(long bytes) => bytes switch { >= 1L << 30 => $"{bytes / (double)(1L << 30):0.##} GB", >= 1L << 20 => $"{bytes / (double)(1L << 20):0.##} MB", >= 1L << 10 => $"{bytes / 1024d:0.##} KB", _ => $"{bytes:N0} B" };
     private static void OpenDirectory(string path) { Directory.CreateDirectory(path); Process.Start(new ProcessStartInfo("explorer.exe", path) { UseShellExecute = true }); }

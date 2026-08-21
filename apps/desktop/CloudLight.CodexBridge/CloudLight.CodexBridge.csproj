@@ -18,4 +18,7 @@
     <Resource Include="Resources\AppIcon.ico" />
     <Resource Include="Resources\AppIcon.png" />
   </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.7" />
+  </ItemGroup>
 </Project>
