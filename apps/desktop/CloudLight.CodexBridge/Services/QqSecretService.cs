@@ -14,7 +14,7 @@ public sealed class QqSecretService
 			? "CloudLight.CodexBridge/qqbot-app-secret/v1"
 			: $"CloudLight.CodexBridge/qqbot-app-secret/{profilePart}/v1";
 		_store = new DpapiSecretStore(
-			Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CloudLight", "CodexBridge", "secrets", fileName),
+			Path.Combine(AppDataPathService.Shared.GetSecretsDirectory(), fileName),
 			entropy,
 			"QQ Bot AppSecret");
 	}

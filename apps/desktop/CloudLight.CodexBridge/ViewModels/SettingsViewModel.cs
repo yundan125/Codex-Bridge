@@ -3,6 +3,7 @@ using System.Windows.Input;
 using CloudLight.CodexBridge.Infrastructure;
 using CloudLight.CodexBridge.Models;
 using CloudLight.CodexBridge.Services;
+using Forms = System.Windows.Forms;
 
 namespace CloudLight.CodexBridge.ViewModels;
 
@@ -16,6 +17,7 @@ public sealed class SettingsViewModel : ObservableObject
     private readonly CodexDiscoveryService _codexDiscoveryService;
 	private readonly OpenClawSecretService _openClawSecrets;
 	private readonly OpenClawDiscoveryService _openClawDiscoveryService;
+	private readonly AppDataPathService _paths = AppDataPathService.Shared;
 	private readonly SemaphoreSlim _mirrorOperationLock = new(1, 1);
     private string _codexCustomPath;
     private string _sandboxMode;
@@ -79,6 +81,9 @@ public sealed class SettingsViewModel : ObservableObject
         SaveCommand = new AsyncRelayCommand(SaveAsync);
         OpenDataDirectoryCommand = new RelayCommand(_ => OpenDirectory(DataDirectory));
         OpenLogDirectoryCommand = new RelayCommand(_ => OpenDirectory(LogDirectory));
+		ChangeDataDirectoryCommand = new AsyncRelayCommand(ChangeDataDirectoryAsync);
+		ChangeLogDirectoryCommand = new AsyncRelayCommand(ChangeLogDirectoryAsync);
+		RestoreDefaultDataDirectoryCommand = new AsyncRelayCommand(RestoreDefaultDataDirectoryAsync);
 		DiscoverOpenClawCommand = new AsyncRelayCommand(DiscoverOpenClawAsync);
 		TestOpenClawCommand = new AsyncRelayCommand(TestOpenClawAsync);
 		ClearOpenClawCredentialsCommand = new AsyncRelayCommand(ClearOpenClawCredentialsAsync);
@@ -87,12 +92,16 @@ public sealed class SettingsViewModel : ObservableObject
     public ICommand SaveCommand { get; }
     public ICommand OpenDataDirectoryCommand { get; }
     public ICommand OpenLogDirectoryCommand { get; }
+	public ICommand ChangeDataDirectoryCommand { get; }
+	public ICommand ChangeLogDirectoryCommand { get; }
+	public ICommand RestoreDefaultDataDirectoryCommand { get; }
 	public ICommand DiscoverOpenClawCommand { get; }
 	public ICommand TestOpenClawCommand { get; }
 	public ICommand ClearOpenClawCredentialsCommand { get; }
     public IReadOnlyList<string> SandboxModes { get; } = ["workspace-write", "read-only"];
     public string DataDirectory => _service.DataDirectory;
     public string LogDirectory => _service.LogDirectory;
+	public string DefaultDataDirectory => AppDataPathService.DefaultDataDirectory;
     public IReadOnlyList<string> Themes { get; } = ["system", "light", "dark"];
     public IReadOnlyList<int> ThreadRefreshIntervals { get; } = [10, 15, 30, 60, 120, 300];
     public bool StartWithWindows { get => _startWithWindows; set => SetProperty(ref _startWithWindows, value); }
@@ -112,6 +121,75 @@ public sealed class SettingsViewModel : ObservableObject
 	public string OpenClawStatusText { get => _openClawStatusText; private set => SetProperty(ref _openClawStatusText, value); }
 	public string OpenClawDiscoverySource { get => _openClawDiscoverySource; private set => SetProperty(ref _openClawDiscoverySource, value); }
 	public string OpenClawCredentialSummary => _openClawCredentialsConfigured || !string.IsNullOrWhiteSpace(_openClawToken) || !string.IsNullOrWhiteSpace(_openClawPassword) ? "已保存访问凭据" : "未保存访问凭据";
+
+	public async Task<bool> PromptLegacyMigrationAsync()
+	{
+		if (!_paths.IsLegacyMigrationPending) return false;
+		var sources = _paths.FindLegacyDirectories();
+		var message = $"检测到旧版本数据：\n{string.Join("\n", sources)}\n\n是否迁移到：\n{_paths.GetDataDirectory()}\n\n迁移会复制并校验文件，旧目录会保留。\n\n选择“是”立即迁移，选择“否”稍后处理。";
+		if (System.Windows.MessageBox.Show(message, "检测到旧版本数据", MessageBoxButton.YesNo, MessageBoxImage.Information) != MessageBoxResult.Yes)
+			return false;
+		var result = await _paths.MigrateAsync(sources, _paths.GetDataDirectory());
+		if (!result.Succeeded)
+		{
+			SaveResult = $"迁移完成，但有 {result.Failures.Count} 个文件失败；旧数据已保留，请查看日志。";
+			foreach (var failure in result.Failures) _logs.Add("data-migration", failure);
+			return false;
+		}
+		await _service.SaveAsync(_settings);
+		await _paths.MarkLegacyMigrationHandledAsync();
+		SaveResult = $"已迁移并校验 {result.CopiedFiles} 个文件；跳过 {result.SkippedFiles} 个相同文件，旧目录仍保留。";
+		return true;
+	}
+
+	private async Task ChangeDataDirectoryAsync()
+	{
+		using var dialog = new Forms.FolderBrowserDialog { Description = "选择应用数据目录", UseDescriptionForTitle = true, SelectedPath = DataDirectory };
+		if (dialog.ShowDialog() != Forms.DialogResult.OK) return;
+		var selected = Path.GetFullPath(dialog.SelectedPath);
+		if (selected.Equals(Path.GetFullPath(DataDirectory), StringComparison.OrdinalIgnoreCase)) return;
+		if (System.Windows.MessageBox.Show($"应用数据将复制并校验到：\n{selected}\n\n旧目录会保留。切换将在重启软件后完全生效。", "修改数据目录", MessageBoxButton.OKCancel, MessageBoxImage.Information) != MessageBoxResult.OK) return;
+		try
+		{
+			await _service.SaveAsync(_settings);
+			var result = await _paths.MigrateAsync([DataDirectory], selected);
+			if (!result.Succeeded) throw new IOException($"有 {result.Failures.Count} 个文件复制失败；路径未切换。\n{string.Join("\n", result.Failures.Take(3))}");
+			await _paths.SavePathsAsync(selected, "");
+			OnPropertyChanged(nameof(DataDirectory)); OnPropertyChanged(nameof(LogDirectory));
+			SaveResult = $"数据目录已切换；已校验复制 {result.CopiedFiles} 个文件。请重启软件完成切换，旧目录仍保留。";
+		}
+		catch (Exception exception) { SaveResult = UiText.UserError(exception, "修改数据目录"); _logs.AddException("data-path", "修改数据目录失败。", exception); }
+	}
+
+	private async Task ChangeLogDirectoryAsync()
+	{
+		using var dialog = new Forms.FolderBrowserDialog { Description = "选择日志目录", UseDescriptionForTitle = true, SelectedPath = LogDirectory };
+		if (dialog.ShowDialog() != Forms.DialogResult.OK) return;
+		try
+		{
+			var selected = Path.GetFullPath(dialog.SelectedPath);
+			Directory.CreateDirectory(selected);
+			await _paths.SavePathsAsync(DataDirectory, selected);
+			OnPropertyChanged(nameof(LogDirectory));
+			SaveResult = "日志目录已保存；新目录将在重启软件后使用。当前日志会继续写入原目录直到退出。";
+		}
+		catch (Exception exception) { SaveResult = UiText.UserError(exception, "修改日志目录"); }
+	}
+
+	private async Task RestoreDefaultDataDirectoryAsync()
+	{
+		if (Path.GetFullPath(DataDirectory).Equals(Path.GetFullPath(DefaultDataDirectory), StringComparison.OrdinalIgnoreCase)) return;
+		if (System.Windows.MessageBox.Show($"是否把数据复制回默认目录？\n{DefaultDataDirectory}\n\n当前目录会保留。", "恢复默认目录", MessageBoxButton.YesNo, MessageBoxImage.Information) != MessageBoxResult.Yes) return;
+		try
+		{
+			var result = await _paths.MigrateAsync([DataDirectory], DefaultDataDirectory);
+			if (!result.Succeeded) throw new IOException($"有 {result.Failures.Count} 个文件复制失败；路径未切换。");
+			await _paths.SavePathsAsync(DefaultDataDirectory, "");
+			OnPropertyChanged(nameof(DataDirectory)); OnPropertyChanged(nameof(LogDirectory));
+			SaveResult = "已恢复默认数据目录。请重启软件完成切换，原目录仍保留。";
+		}
+		catch (Exception exception) { SaveResult = UiText.UserError(exception, "恢复默认目录"); }
+	}
 
 	public void SetOpenClawToken(string value)
 	{

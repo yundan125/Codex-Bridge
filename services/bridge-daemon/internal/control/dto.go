@@ -63,6 +63,8 @@ type StartTurnRequest struct {
 	CollaborationMode string  `json:"collaborationMode"`
 	Model             *string `json:"model"`
 	ReasoningEffort   *string `json:"reasoningEffort"`
+	PermissionMode    *string `json:"permissionMode"`
+	NetworkAccess     *string `json:"networkAccess"`
 	Origin            string  `json:"-"`
 }
 

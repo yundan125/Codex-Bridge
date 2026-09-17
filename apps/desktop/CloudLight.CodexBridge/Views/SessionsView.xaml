@@ -21,7 +21,7 @@
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <TextBlock Text="{StaticResource SessionsTitle}" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center" />
-                    <Button Grid.Column="1" Content="{StaticResource Refresh}" Command="{Binding RefreshCommand}" />
+                    <StackPanel Grid.Column="1" Orientation="Horizontal"><Button Content="新建聊天" Command="{Binding NewChatCommand}" Style="{StaticResource PrimaryButtonStyle}"/><Button Content="{StaticResource Refresh}" Command="{Binding RefreshCommand}" Margin="8,0,0,0"/></StackPanel>
                 </Grid>
                 <TextBox Grid.Row="1" Margin="14,0,14,12" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
                          ToolTip="{StaticResource SearchHint}" />

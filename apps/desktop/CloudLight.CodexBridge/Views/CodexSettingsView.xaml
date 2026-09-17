@@ -1,0 +1,74 @@
+<UserControl x:Class="CloudLight.CodexBridge.Views.CodexSettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:CloudLight.CodexBridge.Controls">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" HorizontalContentAlignment="Stretch">
+        <StackPanel MaxWidth="1480" HorizontalAlignment="Center">
+            <controls:ResponsiveCardPanel MinItemWidth="410" MaxColumns="2" Margin="0,0,0,16">
+                <Border Style="{StaticResource CardStyle}">
+                    <StackPanel>
+                        <TextBlock Text="新建聊天默认配置" Style="{StaticResource SectionTitleStyle}"/>
+                        <TextBlock Text="软件、QQ 和 Telegram 发起新的 Codex 任务时会使用同一组默认值。" Style="{StaticResource SecondaryTextStyle}" TextWrapping="Wrap" Margin="0,5,0,14"/>
+                        <TextBlock Text="模型" Style="{StaticResource FieldLabelStyle}"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <ComboBox ItemsSource="{Binding ModelOptions}" DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding DefaultModel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                            <Button Grid.Column="1" Content="刷新模型" Command="{Binding RefreshModelsCommand}" Margin="8,0,0,0"/>
+                        </Grid>
+                        <TextBlock Text="{Binding ModelStatusText}" Style="{StaticResource SecondaryTextStyle}" TextWrapping="Wrap" Margin="0,5,0,12"/>
+                        <TextBlock Text="思考强度" Style="{StaticResource FieldLabelStyle}"/>
+                        <ComboBox ItemsSource="{Binding ReasoningOptions}" DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding ReasoningEffort, Mode=TwoWay}"/>
+                        <TextBlock Text="文件访问范围" Style="{StaticResource FieldLabelStyle}" Margin="0,12,0,5"/>
+                        <ComboBox ItemsSource="{Binding PermissionModes}" DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding PermissionMode}"/>
+                        <TextBlock Text="网络访问" Style="{StaticResource FieldLabelStyle}" Margin="0,12,0,5"/>
+                        <ComboBox ItemsSource="{Binding NetworkModes}" DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding NetworkAccess}"/>
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource CardStyle}">
+                    <StackPanel>
+                        <TextBlock Text="工作目录与会话" Style="{StaticResource SectionTitleStyle}"/>
+                        <TextBlock Text="默认工作目录" Style="{StaticResource FieldLabelStyle}" Margin="0,15,0,5"/>
+                        <TextBox Text="{Binding WorkingDirectory, UpdateSourceTrigger=PropertyChanged}"/>
+                        <Button Content="选择目录" Command="{Binding ChooseWorkingDirectoryCommand}" HorizontalAlignment="Left" Margin="0,8,0,0"/>
+                        <TextBlock Text="默认会话策略" Style="{StaticResource FieldLabelStyle}" Margin="0,15,0,5"/>
+                        <ComboBox ItemsSource="{Binding SessionStrategies}" DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding SessionStrategy}"/>
+                        <TextBlock Text="“按项目设置”优先使用项目页中指定的会话；没有指定时再复用同目录最近的会话。" Style="{StaticResource SecondaryTextStyle}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                    </StackPanel>
+                </Border>
+            </controls:ResponsiveCardPanel>
+
+            <Border Style="{StaticResource CardStyle}" Margin="0,0,0,16">
+                <StackPanel>
+                    <TextBlock Text="Codex 配置文件" Style="{StaticResource SectionTitleStyle}"/>
+                    <TextBlock Text="配置目录" Style="{StaticResource FieldLabelStyle}" Margin="0,15,0,4"/><TextBox Text="{Binding ConfigDirectory, Mode=OneWay}" Style="{StaticResource ReadOnlyTextStyle}"/>
+                    <TextBlock Text="配置文件" Style="{StaticResource FieldLabelStyle}" Margin="0,12,0,4"/><TextBox Text="{Binding ConfigFile, Mode=OneWay}" Style="{StaticResource ReadOnlyTextStyle}"/>
+                    <WrapPanel Margin="0,12,0,0"><Button Content="打开配置文件目录" Command="{Binding OpenConfigDirectoryCommand}"/><Button Content="打开配置文件" Command="{Binding OpenConfigFileCommand}" Margin="8,0,0,0"/><Button Content="打开本软件的 Codex 设置目录" Command="{Binding OpenSettingsDirectoryCommand}" Margin="8,0,0,0"/></WrapPanel>
+                </StackPanel>
+            </Border>
+
+            <Expander Header="高级设置" IsExpanded="False" Margin="0,0,0,16">
+                <Border Style="{StaticResource CardStyle}" Margin="0,8,0,0">
+                    <StackPanel>
+                        <TextBlock Text="不认识的配置字段会在保存时原样保留。" Style="{StaticResource SecondaryTextStyle}" TextWrapping="Wrap"/>
+                        <controls:ResponsiveCardPanel MinItemWidth="360" MaxColumns="2" Margin="0,14,0,0">
+                            <StackPanel><TextBlock Text="自定义 Codex 参数（JSON 对象）" Style="{StaticResource FieldLabelStyle}"/><TextBox Text="{Binding CustomParametersText, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" MinHeight="130" FontFamily="Cascadia Mono, Consolas" VerticalScrollBarVisibility="Auto"/></StackPanel>
+                            <StackPanel><TextBlock Text="默认环境变量（每行 名称=值）" Style="{StaticResource FieldLabelStyle}"/><TextBox Text="{Binding EnvironmentVariablesText, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" MinHeight="130" FontFamily="Cascadia Mono, Consolas" VerticalScrollBarVisibility="Auto"/></StackPanel>
+                        </controls:ResponsiveCardPanel>
+                        <TextBlock Text="默认启动参数（每行一个）" Style="{StaticResource FieldLabelStyle}" Margin="0,14,0,5"/>
+                        <TextBox Text="{Binding LaunchArgumentsText, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" MinHeight="85" FontFamily="Cascadia Mono, Consolas"/>
+                        <controls:ResponsiveCardPanel MinItemWidth="250" MaxColumns="3" Margin="0,14,0,0">
+                            <StackPanel><TextBlock Text="超时时间（秒）" Style="{StaticResource FieldLabelStyle}"/><TextBox Text="{Binding TimeoutSeconds, UpdateSourceTrigger=PropertyChanged}"/></StackPanel>
+                            <StackPanel><TextBlock Text="自动重试次数" Style="{StaticResource FieldLabelStyle}"/><TextBox Text="{Binding AutoRetryCount, UpdateSourceTrigger=PropertyChanged}"/></StackPanel>
+                            <StackPanel><TextBlock Text="最大输出字符数" Style="{StaticResource FieldLabelStyle}"/><TextBox Text="{Binding MaximumOutputCharacters, UpdateSourceTrigger=PropertyChanged}"/></StackPanel>
+                        </controls:ResponsiveCardPanel>
+                    </StackPanel>
+                </Border>
+            </Expander>
+
+            <DockPanel LastChildFill="True">
+                <Button Content="保存 Codex 设置" Command="{Binding SaveCommand}" Style="{StaticResource PrimaryButtonStyle}" DockPanel.Dock="Left"/>
+                <TextBlock Text="{Binding StatusText}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="14,0,0,0"/>
+            </DockPanel>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

@@ -10,6 +10,141 @@ using CloudLight.CodexBridge.ViewModels;
 using CloudLight.CodexBridge.Views;
 using Microsoft.Win32;
 
+if (args.Contains("--ui-startup-tests", StringComparer.OrdinalIgnoreCase))
+{
+    Exception? startupFailure = null;
+    var testRoot = Path.Combine(Path.GetTempPath(), $"CloudLight-UiStartup-{Guid.NewGuid():N}");
+    var thread = new Thread(() =>
+    {
+        try
+        {
+            var app = new CloudLight.CodexBridge.App();
+            app.InitializeComponent();
+            var paths = new AppDataPathService(Path.Combine(testRoot, "pointer", "paths.json"));
+            using var logs = new LogService(paths);
+            var settings = new SettingsService(paths.GetDataDirectory(), paths.GetSettingsFile());
+            var codexSettings = new CodexSettingsView
+            {
+                DataContext = new CodexSettingsViewModel(settings, new UserSettings(), logs,
+                    new CodexSettingsService(paths, Path.Combine(testRoot, "codex")))
+            };
+            var views = new System.Windows.FrameworkElement[]
+            {
+                new CloudLight.CodexBridge.MainWindow(), codexSettings, new BackupView(), new SettingsView(), new ChannelProfilesView()
+            };
+            foreach (var view in views)
+            {
+                view.Measure(new System.Windows.Size(900, 620));
+                view.Arrange(new System.Windows.Rect(0, 0, 900, 620));
+                view.UpdateLayout();
+            }
+            foreach (var window in views.OfType<System.Windows.Window>()) window.Close();
+            app.Shutdown();
+        }
+        catch (Exception exception) { startupFailure = exception; }
+    });
+    thread.SetApartmentState(ApartmentState.STA);
+    thread.Start();
+    thread.Join();
+    try { if (Directory.Exists(testRoot)) Directory.Delete(testRoot, true); } catch { }
+    if (startupFailure is not null) throw new InvalidOperationException("WPF UI 启动或布局失败。", startupFailure);
+    Console.WriteLine("PASS WPF application resources, main window and changed pages with Codex Settings bindings load/layout at 900x620");
+    return;
+}
+
+if (args.Contains("--new-settings-tests", StringComparer.OrdinalIgnoreCase))
+{
+    var testRoot = Path.Combine(Path.GetTempPath(), $"CloudLight-NewSettings-{Guid.NewGuid():N}");
+    var pointer = Path.Combine(testRoot, "pointer", "paths.json");
+    var source = Path.Combine(testRoot, "legacy");
+    var target = Path.Combine(testRoot, "current");
+    try
+    {
+        Directory.CreateDirectory(Path.Combine(source, "data"));
+        await File.WriteAllTextAsync(Path.Combine(source, "data", "tasks.json"), "{\"version\":1}");
+        var paths = new AppDataPathService(pointer);
+        var migration = await paths.MigrateAsync([source], target);
+        Assert(migration.Succeeded && migration.CopiedFiles == 1 && File.Exists(Path.Combine(target, "data", "tasks.json")),
+            "旧数据迁移必须复制并完成 SHA-256 校验，同时保留源目录");
+        Assert(Directory.Exists(source), "路径迁移成功后不得删除旧目录");
+        await paths.SavePathsAsync(target, Path.Combine(testRoot, "custom-logs"));
+        Assert(paths.GetDataDirectory() == Path.GetFullPath(target) &&
+               paths.GetLogDirectory() == Path.GetFullPath(Path.Combine(testRoot, "custom-logs")) &&
+               paths.GetBackupDirectory().StartsWith(Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase),
+            "统一路径服务必须提供数据、日志、备份和配置目录");
+
+        Directory.CreateDirectory(paths.GetConfigDirectory());
+        await File.WriteAllTextAsync(paths.GetCodexSettingsFile(), """
+            {
+              "defaultModel": "gpt-5",
+              "reasoningEffort": "high",
+              "permissionMode": "read-only",
+              "networkAccess": "enabled",
+              "futureRootSetting": { "keep": true },
+              "advanced": {
+                "timeoutSeconds": 120,
+                "futureAdvancedSetting": [1, 2, 3]
+              }
+            }
+            """);
+        var codexHome = Path.Combine(testRoot, "codex");
+        Directory.CreateDirectory(codexHome);
+        await File.WriteAllTextAsync(Path.Combine(codexHome, "models_cache.json"), """
+            {
+              "models": [
+                {
+                  "slug": "gpt-6-astra",
+                  "display_name": "GPT-6-Astra",
+                  "visibility": "list",
+                  "default_reasoning_level": "low",
+                  "supported_reasoning_levels": [
+                    { "effort": "low", "description": "Fast" },
+                    { "effort": "ultra", "description": "Maximum" }
+                  ]
+                },
+                {
+                  "slug": "internal-hidden",
+                  "display_name": "Hidden",
+                  "visibility": "hide",
+                  "default_reasoning_level": "medium",
+                  "supported_reasoning_levels": []
+                }
+              ]
+            }
+            """);
+        var codexSettingsService = new CodexSettingsService(paths, codexHome);
+        var codexSettings = await codexSettingsService.LoadAsync();
+        Assert(codexSettings.DefaultModel == "gpt-5" && codexSettings.PermissionMode == "read-only" &&
+               codexSettings.UnknownFields.ContainsKey("futureRootSetting") &&
+               codexSettings.Advanced.UnknownFields.ContainsKey("futureAdvancedSetting"),
+            "Codex 设置必须读取已知字段并保留未知字段");
+        codexSettings.DefaultModel = "gpt-5-mini";
+        codexSettings.ReasoningEffort = "ultra";
+        await codexSettingsService.SaveAsync(codexSettings);
+        var cachedModels = await codexSettingsService.LoadCachedModelsAsync();
+        var saved = await File.ReadAllTextAsync(paths.GetCodexSettingsFile());
+        Assert(saved.Contains("futureRootSetting") && saved.Contains("futureAdvancedSetting") && saved.Contains("gpt-5-mini") && saved.Contains("ultra"),
+            "保存 Codex 设置不得删除未知字段或降级 Codex 支持的思考强度");
+        Assert(cachedModels.Count == 1 && cachedModels[0].Model == "gpt-6-astra" &&
+               cachedModels[0].SupportedReasoningEfforts.Any(effort => effort.ReasoningEffort == "ultra"),
+            "模型缓存读取必须返回可见模型及其真实支持的思考强度");
+
+        var oldSettings = SettingsService.NormalizeForMigration(new UserSettings
+        {
+            TelegramAllowedUserIds = [42], QqAppId = "10001", ChannelProfilesMigrated = false
+        });
+        Assert(oldSettings.ChannelProfiles.Any(profile => profile.Id == "telegram-default") &&
+               oldSettings.ChannelProfiles.Any(profile => profile.Id == "qq-default"),
+            "旧版本机器人设置必须继续迁移到默认机器人配置");
+        Console.WriteLine("PASS unified paths, verified legacy migration, Codex settings unknown-field preservation, old settings migration");
+    }
+    finally
+    {
+        if (Directory.Exists(testRoot)) Directory.Delete(testRoot, true);
+    }
+    return;
+}
+
 if (args.Contains("--codex-discovery-retry-tests", StringComparer.OrdinalIgnoreCase))
 {
     var logs = new LogService();
@@ -505,14 +640,37 @@ var service = new BackupService(settings, codex, bridgeLocal, bridgeRoaming);
 var backupPath = Path.Combine(backups, "roundtrip.clcbak");
 var result = await service.CreateBackupAsync(backupPath, true, true);
 Assert(result.IsComplete, "备份必须完整成功");
-Assert(result.Manifest.FileCount == 15, $"预期 15 个持久化文件，实际 {result.Manifest.FileCount}");
+Assert(result.Manifest.FileCount == 16, $"预期 16 个持久化文件，实际 {result.Manifest.FileCount}");
 Assert(result.Manifest.Modules.Any(module => module.Module == BackupModules.TaskCenter), "任务与项目必须单独作为可恢复模块记录");
 Assert(result.Manifest.Files.Any(file => file.RelativePath == "bridge/local/data/tasks.json") &&
        result.Manifest.Files.Any(file => file.RelativePath == "bridge/local/data/projects.json"), "备份 manifest 必须记录 tasks.json 和 projects.json");
 Assert(result.Manifest.ExcludedRuntimeFiles.Any(path => path.Contains("cache", StringComparison.OrdinalIgnoreCase)), "cache 必须在创建阶段排除");
 Assert(result.Manifest.ExcludedRuntimeFiles.Any(path => path.Contains("tmp", StringComparison.OrdinalIgnoreCase)), "tmp/lock 必须在创建阶段排除");
-Assert(result.Manifest.ExcludedRuntimeFiles.Any(path => path.Contains("logs", StringComparison.OrdinalIgnoreCase)), "日志必须在创建阶段排除");
+Assert(result.Manifest.Files.Any(file => file.Module == BackupModules.Logs && file.RelativePath.EndsWith("bridge-daemon.log")), "日志必须作为可选择恢复模块记录");
 var expected = Snapshot(codex, bridgeLocal, bridgeRoaming);
+
+await File.WriteAllTextAsync(Path.Combine(codex, "config.toml"), "model = \"gpt-incremental\"\n");
+File.Delete(Path.Combine(codex, "sessions", "a.jsonl"));
+var incrementalPath = Path.Combine(backups, "incremental.clcbak");
+var incremental = await service.CreateIncrementalBackupAsync(incrementalPath, backupPath, true, true);
+Assert(incremental.Manifest.BackupType == BackupTypes.Incremental && incremental.Manifest.BaseBackupId == result.Manifest.BackupId,
+    "增量备份必须记录类型和基础备份 ID");
+Assert(incremental.Manifest.ChangedFiles.Any(file => file.RelativePath == "codex/config.toml") &&
+       incremental.Manifest.DeletedFiles.Contains("codex/sessions/a.jsonl", StringComparer.OrdinalIgnoreCase),
+    "增量备份必须记录变化文件和删除项");
+var inspection = await service.InspectBackupAsync(incrementalPath);
+Assert(inspection.ChainLength == 2 && inspection.EffectiveFiles.Any(file => file.RelativePath == "codex/config.toml") &&
+       inspection.EffectiveFiles.All(file => file.RelativePath != "codex/sessions/a.jsonl") && inspection.ProjectCount == 1,
+    "恢复预览必须合并完整备份与增量备份并应用删除记录");
+await File.WriteAllTextAsync(Path.Combine(codex, "config.toml"), "changed-after-incremental");
+await service.RestoreAsync(incrementalPath, new RestoreOptions
+{
+    RestoreCodex = true, RestoreBridge = false, Replace = true, VerifyNoExternalCodex = false,
+    PreRestoreDirectory = backups,
+    SelectedModules = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { BackupModules.CodexSettings }
+}, null, null);
+Assert((await File.ReadAllTextAsync(Path.Combine(codex, "config.toml"))).Contains("gpt-incremental"),
+    "选择恢复 Codex 设置时必须从增量链恢复最新内容");
 
 await File.WriteAllTextAsync(Path.Combine(codex, "config.toml"), "changed");
 File.Delete(Path.Combine(codex, "sessions", "a.jsonl"));
@@ -625,16 +783,15 @@ var brokenRejected = false;
 try { await service.ReadAndValidateAsync(brokenZip); } catch (InvalidDataException) { brokenRejected = true; }
 Assert(brokenRejected, "ZIP 容器损坏必须拒绝恢复");
 
-var runtimeOnly = Path.Combine(backups, "runtime-only.clcbak");
+var runtimeOnly = Path.Combine(backups, "log-only.clcbak");
 using (var archive = ZipFile.Open(runtimeOnly, ZipArchiveMode.Create))
 {
     var entry = archive.CreateEntry("codex/logs/only.log");
     await using var writer = new StreamWriter(entry.Open());
     await writer.WriteAsync("runtime");
 }
-var emptyRejected = false;
-try { await service.ReadAndValidateAsync(runtimeOnly); } catch (InvalidDataException) { emptyRejected = true; }
-Assert(emptyRejected, "只有运行时文件、没有任何可恢复数据时必须拒绝恢复");
+var logOnly = await service.ReadAndValidateAsync(runtimeOnly);
+Assert(logOnly.CanRestore && logOnly.Modules.Any(module => module.Module == BackupModules.Logs), "日志备份必须可单独识别和恢复");
 
 const string runKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
 object? previous;

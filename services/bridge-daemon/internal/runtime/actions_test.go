@@ -2,12 +2,34 @@ package runtime
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/control"
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/interactions"
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/security"
 )
+
+func TestCodexDefaultsPreserveAdvertisedModelAndUltraEffort(t *testing.T) {
+	settingsFile := filepath.Join(t.TempDir(), "codex-settings.json")
+	if err := os.WriteFile(settingsFile, []byte(`{"defaultModel":"gpt-6-astra","reasoningEffort":"ultra","workingDirectory":"D:/code/default"}`), 0o600); err != nil {
+		t.Fatalf("write Codex settings: %v", err)
+	}
+	manager := &Manager{codexSettingsFile: settingsFile}
+	request := manager.applyCodexDefaults(control.StartTurnRequest{})
+	if request.Model == nil || *request.Model != "gpt-6-astra" || request.ReasoningEffort == nil || *request.ReasoningEffort != "ultra" {
+		t.Fatalf("Codex defaults were not passed to a new task: %#v", request)
+	}
+	if request.CWD != "D:/code/default" {
+		t.Fatalf("default working directory = %q", request.CWD)
+	}
+	explicitModel, explicitEffort := "gpt-5.5", "high"
+	request = manager.applyCodexDefaults(control.StartTurnRequest{Model: &explicitModel, ReasoningEffort: &explicitEffort})
+	if *request.Model != explicitModel || *request.ReasoningEffort != explicitEffort {
+		t.Fatalf("explicit task options were overwritten: %#v", request)
+	}
+}
 
 func TestQQTurnUsesUnrestrictedWithoutApproval(t *testing.T) {
 	options, err := turnStartOptions(control.StartTurnRequest{Origin: control.TurnOriginQQ}, "D:/code/project", "read-only")

@@ -31,9 +31,7 @@ public sealed partial class LogService : IDisposable
     private long _droppedFileWrites;
     private bool _disposed;
 
-    public string LogDirectory { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "CloudLight", "CodexBridge", "logs");
+    public string LogDirectory { get; }
     public string DesktopLogFile => Path.Combine(LogDirectory, "desktop.log");
     public ObservableCollection<LogEntry> Entries { get; } = [];
 
@@ -41,8 +39,9 @@ public sealed partial class LogService : IDisposable
     public int PendingViewEntries => Math.Max(0, Volatile.Read(ref _queuedViewEntries));
     public long DroppedFileWrites => Interlocked.Read(ref _droppedFileWrites);
 
-    public LogService()
+    public LogService(AppDataPathService? paths = null)
     {
+        LogDirectory = (paths ?? AppDataPathService.Shared).GetLogDirectory();
         _fileWriter = Task.Run(WriteFileLoopAsync);
     }
 

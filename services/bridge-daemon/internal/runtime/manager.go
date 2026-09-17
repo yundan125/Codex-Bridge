@@ -84,18 +84,19 @@ type keyedThreadLock struct {
 }
 
 type Manager struct {
-	mu           sync.RWMutex
-	status       Status
-	detection    appserver.Detection
-	codexPath    string
-	cwd          string
-	client       *appserver.Client
-	broker       *events.Broker
-	logger       *bridgelog.SafeLogger
-	ctx          context.Context
-	cancel       context.CancelFunc
-	interactions *interactions.Store
-	registry     any
+	mu                sync.RWMutex
+	status            Status
+	detection         appserver.Detection
+	codexPath         string
+	codexSettingsFile string
+	cwd               string
+	client            *appserver.Client
+	broker            *events.Broker
+	logger            *bridgelog.SafeLogger
+	ctx               context.Context
+	cancel            context.CancelFunc
+	interactions      *interactions.Store
+	registry          any
 
 	stateMu  sync.RWMutex
 	states   map[string]control.RuntimeState
@@ -456,6 +457,14 @@ func (m *Manager) ThreadList(ctx context.Context, limit int, cursor string) (map
 		}
 	}
 	return raw, err
+}
+
+func (m *Manager) ModelList(ctx context.Context, limit int, cursor string) (map[string]any, error) {
+	client, err := m.runningClient()
+	if err != nil {
+		return nil, err
+	}
+	return client.ModelList(ctx, limit, cursor)
 }
 
 func (m *Manager) ThreadRead(ctx context.Context, threadID string, includeTurns bool) (map[string]any, error) {

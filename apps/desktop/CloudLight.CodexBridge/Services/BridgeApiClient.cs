@@ -28,6 +28,23 @@ public sealed class BridgeApiClient(LogService logs) : IDisposable
     public Task<BridgeStatus> GetStatusAsync(CancellationToken cancellationToken = default) =>
         GetAsync<BridgeStatus>("/api/v1/status", cancellationToken);
 
+    public async Task<CodexModelListResponse> GetCodexModelsAsync(CancellationToken cancellationToken = default)
+    {
+        var result = new CodexModelListResponse();
+        string? cursor = null;
+        var seenCursors = new HashSet<string>(StringComparer.Ordinal);
+        do
+        {
+            var uri = "/api/v1/codex/models?limit=100";
+            if (!string.IsNullOrWhiteSpace(cursor)) uri += $"&cursor={Uri.EscapeDataString(cursor)}";
+            var page = await GetAsync<CodexModelListResponse>(uri, cancellationToken);
+            if (page.Data is { Count: > 0 }) result.Data.AddRange(page.Data);
+            cursor = string.IsNullOrWhiteSpace(page.NextCursor) ? null : page.NextCursor;
+        }
+        while (cursor is not null && seenCursors.Add(cursor) && seenCursors.Count < 20);
+        return result;
+    }
+
     public Task<OpenClawConnectionStatus> GetOpenClawStatusAsync(CancellationToken cancellationToken = default) =>
         GetAsync<OpenClawConnectionStatus>("/api/v1/openclaw/status", cancellationToken);
 
@@ -62,6 +79,9 @@ public sealed class BridgeApiClient(LogService logs) : IDisposable
 
     public Task<ThreadDetail> GetThreadAsync(string threadId, CancellationToken cancellationToken = default) =>
         GetAsync<ThreadDetail>($"/api/v1/threads/{Uri.EscapeDataString(threadId)}?includeTurns=true", cancellationToken);
+
+    public Task<ThreadSummary> CreateThreadAsync(string workingDirectory = "", CancellationToken cancellationToken = default) =>
+        SendJsonAsync<ThreadSummary>(HttpMethod.Post, "/api/v1/threads", new { workingDirectory }, cancellationToken);
 
     public Task<TurnAccepted> StartTurnAsync(string threadId, StartTurnRequest input, CancellationToken cancellationToken = default) =>
         SendJsonAsync<TurnAccepted>(HttpMethod.Post, $"/api/v1/threads/{Uri.EscapeDataString(threadId)}/turns", input, cancellationToken);

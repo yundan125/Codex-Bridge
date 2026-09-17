@@ -14,7 +14,7 @@ public sealed class TelegramSecretService
 			? "CloudLight.CodexBridge/telegram-token/v1"
 			: $"CloudLight.CodexBridge/telegram-token/{profilePart}/v1";
 		_store = new DpapiSecretStore(
-			Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CloudLight", "CodexBridge", "secrets", fileName),
+			Path.Combine(AppDataPathService.Shared.GetSecretsDirectory(), fileName),
 			entropy,
 			"Telegram Token");
 	}

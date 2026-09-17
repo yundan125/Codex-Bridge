@@ -23,7 +23,7 @@ const (
 func ParseSandboxMode(value string) (SandboxMode, error) {
 	mode := SandboxMode(strings.TrimSpace(value))
 	switch mode {
-	case SandboxReadOnly, SandboxWorkspaceWrite:
+	case SandboxReadOnly, SandboxWorkspaceWrite, SandboxDangerFullAccess:
 		return mode, nil
 	default:
 		return "", fmt.Errorf("unsupported sandbox mode: %s", value)

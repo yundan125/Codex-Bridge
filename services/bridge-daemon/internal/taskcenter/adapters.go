@@ -79,6 +79,12 @@ type TaskBackendAdapter interface {
 	QueryRunState(context.Context, ConversationRef, string) (RunState, error)
 }
 
+type ConversationCreator interface {
+	CreateConversation(context.Context, string) (ConversationRef, error)
+}
+
+type DefaultSessionStrategyProvider interface{ DefaultSessionStrategy() string }
+
 // FinalAnswerReader is the optional, protocol-aware completion read path.
 // Backends that expose a multi-item history must use it instead of guessing
 // from the last assistant item.
@@ -103,6 +109,10 @@ type codexTaskRuntime interface {
 	InterruptTurn(context.Context, string, string) (control.InterruptResult, error)
 }
 
+type codexThreadCreator interface {
+	CreateThread(context.Context, string) (string, error)
+}
+
 func NewCodexTaskAdapter(reader codexTaskControl, runtime codexTaskRuntime, registry any) *CodexTaskAdapter {
 	return &CodexTaskAdapter{control: reader, runtime: runtime, registry: registry}
 }
@@ -115,8 +125,9 @@ func (a *CodexTaskAdapter) Ready() bool {
 }
 
 func (a *CodexTaskAdapter) Capabilities() AdapterCapabilities {
+	_, canCreate := a.runtime.(codexThreadCreator)
 	return AdapterCapabilities{
-		CanCreateConversation:    false,
+		CanCreateConversation:    canCreate,
 		CanStop:                  true,
 		CanContinue:              true,
 		CanReportWaitingInput:    true,
@@ -128,6 +139,29 @@ func (a *CodexTaskAdapter) Capabilities() AdapterCapabilities {
 		SupportsCancel:           true,
 		SupportsOpenConversation: true,
 	}
+}
+
+func (a *CodexTaskAdapter) CreateConversation(ctx context.Context, workingDirectory string) (ConversationRef, error) {
+	if a.runtime == nil {
+		return ConversationRef{}, errors.New("Codex backend is unavailable")
+	}
+	creator, ok := a.runtime.(codexThreadCreator)
+	if !ok {
+		return ConversationRef{}, errors.New("当前 Codex 连接不支持创建新会话")
+	}
+	threadID, err := creator.CreateThread(ctx, strings.TrimSpace(workingDirectory))
+	if err != nil {
+		return ConversationRef{}, err
+	}
+	return a.ResolveConversation(ctx, 0, threadID)
+}
+
+func (a *CodexTaskAdapter) DefaultSessionStrategy() string {
+	provider, ok := a.runtime.(interface{ CodexSessionStrategy() string })
+	if !ok {
+		return "project"
+	}
+	return provider.CodexSessionStrategy()
 }
 
 func (a *CodexTaskAdapter) ListConversations(ctx context.Context, limit int) ([]ConversationRef, error) {

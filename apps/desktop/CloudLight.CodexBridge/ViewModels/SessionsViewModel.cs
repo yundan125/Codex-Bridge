@@ -57,6 +57,7 @@ public sealed class SessionsViewModel : ObservableObject
         ThreadsView = CollectionViewSource.GetDefaultView(Threads);
         ThreadsView.Filter = MatchesSearch;
         RefreshCommand = new AsyncRelayCommand(() => RefreshAsync());
+        NewChatCommand = new AsyncRelayCommand(CreateThreadAsync);
         _retryCommand = new AsyncRelayCommand(RetryAsync);
         RetryCommand = _retryCommand;
         CopyThreadIdCommand = new RelayCommand(_ => CopyThreadId());
@@ -87,6 +88,7 @@ public sealed class SessionsViewModel : ObservableObject
     public ObservableCollection<PendingInteractionViewModel> PendingInteractions { get; } = [];
     public ICollectionView ThreadsView { get; }
     public ICommand RefreshCommand { get; }
+    public ICommand NewChatCommand { get; }
     public ICommand RetryCommand { get; }
     public ICommand CopyThreadIdCommand { get; }
 	public ICommand CopyThreadPrefixCommand { get; }
@@ -190,6 +192,22 @@ public sealed class SessionsViewModel : ObservableObject
     public string CurrentTurnId => _runtime.TurnId;
     public string PersistenceVerificationText { get; private set; } = "";
     public Visibility PersistenceVerificationVisibility => string.IsNullOrWhiteSpace(PersistenceVerificationText) ? Visibility.Collapsed : Visibility.Visible;
+
+    private async Task CreateThreadAsync()
+    {
+        try
+        {
+            ActionError = "";
+            var created = await _api.CreateThreadAsync();
+            await RefreshAsync();
+            SelectedThread = Threads.FirstOrDefault(item => item.ThreadId == created.ThreadId) ?? created;
+        }
+        catch (Exception exception)
+        {
+            ActionError = UiText.UserError(exception, "新建聊天");
+            _logs.AddException("codex", "新建 Codex 聊天失败。", exception);
+        }
+    }
 
     public async Task RefreshAsync(CancellationToken cancellationToken = default, bool reloadSelected = true)
     {

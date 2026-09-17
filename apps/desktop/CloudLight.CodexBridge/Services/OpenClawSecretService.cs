@@ -6,8 +6,7 @@ namespace CloudLight.CodexBridge.Services;
 public sealed class OpenClawSecretService
 {
     private readonly DpapiSecretStore _store = new(
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "CloudLight", "CodexBridge", "secrets", "openclaw-gateway.dat"),
+        Path.Combine(AppDataPathService.Shared.GetSecretsDirectory(), "openclaw-gateway.dat"),
         "CloudLight.CodexBridge/openclaw-gateway/v1",
         "OpenClaw Gateway 凭据");
 

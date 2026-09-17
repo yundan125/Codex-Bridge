@@ -527,12 +527,22 @@ func (s *Service) allocateConversation(ctx context.Context, adapter TaskBackendA
 	if task.ConversationNumber > 0 || strings.TrimSpace(task.TargetID) != "" {
 		return adapter.ResolveConversation(ctx, task.ConversationNumber, task.TargetID)
 	}
-	if project.DefaultConversationNumber != nil {
-		return adapter.ResolveConversation(ctx, *project.DefaultConversationNumber, "")
-	}
 	strategy := strings.ToLower(strings.TrimSpace(project.ReuseStrategy))
 	if strategy == "" {
 		strategy = ReuseDefault
+	}
+	if strategy == ReuseDefault {
+		if provider, ok := adapter.(DefaultSessionStrategyProvider); ok {
+			switch provider.DefaultSessionStrategy() {
+			case "new":
+				strategy = ReuseCreateNew
+			case "latest":
+				strategy = ReuseLatest
+			}
+		}
+	}
+	if strategy == ReuseDefault && project.DefaultConversationNumber != nil {
+		return adapter.ResolveConversation(ctx, *project.DefaultConversationNumber, "")
 	}
 	if strategy == ReuseLatest {
 		conversations, err := adapter.ListConversations(ctx, 200)
@@ -563,7 +573,14 @@ func (s *Service) allocateConversation(ctx context.Context, adapter TaskBackendA
 			}
 			return ConversationRef{}, errors.New("当前 Codex app-server 不支持由 Bridge 自动创建 Thread，请先设置默认 Codex Thread")
 		}
-		return ConversationRef{}, errors.New("Backend 声明支持创建 Conversation，但当前适配器没有创建实现")
+		creator, ok := adapter.(ConversationCreator)
+		if !ok {
+			return ConversationRef{}, errors.New("处理方式声明支持新建会话，但当前连接没有创建实现")
+		}
+		return creator.CreateConversation(ctx, project.WorkingDirectory)
+	}
+	if project.DefaultConversationNumber != nil {
+		return adapter.ResolveConversation(ctx, *project.DefaultConversationNumber, "")
 	}
 	return ConversationRef{}, errors.New("项目没有可用的默认 Conversation，请先设置默认 Conversation 或选择 latest")
 }

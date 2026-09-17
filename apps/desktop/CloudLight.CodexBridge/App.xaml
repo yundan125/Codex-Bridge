@@ -199,6 +199,7 @@
             <DataTemplate DataType="{x:Type viewModels:CommandsViewModel}"><views:CommandsView /></DataTemplate>
             <DataTemplate DataType="{x:Type viewModels:MirrorViewModel}"><views:MirrorView /></DataTemplate>
             <DataTemplate DataType="{x:Type viewModels:BackupViewModel}"><views:BackupView /></DataTemplate>
+            <DataTemplate DataType="{x:Type viewModels:CodexSettingsViewModel}"><views:CodexSettingsView /></DataTemplate>
             <DataTemplate DataType="{x:Type viewModels:SettingsViewModel}"><views:SettingsView /></DataTemplate>
             <DataTemplate DataType="{x:Type viewModels:LogsViewModel}"><views:LogsView /></DataTemplate>
         </ResourceDictionary>

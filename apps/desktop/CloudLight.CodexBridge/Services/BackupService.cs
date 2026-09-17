@@ -11,7 +11,7 @@ namespace CloudLight.CodexBridge.Services;
 
 public sealed class BackupService
 {
-    private const int CurrentFormatVersion = 2;
+    private const int CurrentFormatVersion = 3;
     private const int OldestSupportedFormatVersion = 1;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -21,12 +21,12 @@ public sealed class BackupService
     };
     private static readonly HashSet<string> RuntimeDirectoryNames = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".sandbox", ".sandbox-bin", ".sandbox-secrets", ".tmp", "cache", "caches", "logs", "log",
+        ".sandbox", ".sandbox-bin", ".sandbox-secrets", ".tmp", "cache", "caches",
         "temp", "tmp", "runtime", "thread-writer-locks", "node_repl", "process_manager"
     };
     private static readonly HashSet<string> RuntimeExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".log", ".tmp", ".lock", ".pid", ".sock"
+        ".tmp", ".lock", ".pid", ".sock"
     };
 
     private readonly SettingsService _settings;
@@ -52,6 +52,7 @@ public sealed class BackupService
     public string CodexHome => _codexHomeOverride is null ? DetectCodexHome() : Path.GetFullPath(_codexHomeOverride);
     public string BridgeLocalData => _bridgeLocalOverride is null ? _settings.DataDirectory : Path.GetFullPath(_bridgeLocalOverride);
     public string BridgeRoamingData => _bridgeRoamingOverride is null ? Path.GetDirectoryName(_settings.SettingsFile)! : Path.GetFullPath(_bridgeRoamingOverride);
+    public string BackupDirectory => _settings.BackupDirectory;
 
     public static string DetectCodexHome()
     {
@@ -143,6 +144,8 @@ public sealed class BackupService
                 FinalizeManifest(manifest, manifest.Files.Select(file => NormalizeArchivePath(file.RelativePath)).ToHashSet(StringComparer.OrdinalIgnoreCase));
                 manifest.FileCount = manifest.Files.Count;
                 manifest.TotalSize = manifest.Files.Sum(item => item.Size);
+                manifest.ChangedFiles = manifest.Files.Select(CloneRecord).ToList();
+                manifest.ManifestHash = CalculateManifestHash(manifest);
                 var manifestEntry = archive.CreateEntry("manifest.json", CompressionLevel.Optimal);
                 await using var manifestStream = manifestEntry.Open();
                 await JsonSerializer.SerializeAsync(manifestStream, manifest, JsonOptions, cancellationToken);
@@ -161,6 +164,146 @@ public sealed class BackupService
             TryDeleteFile(temporary);
             throw;
         }
+    }
+
+    public async Task<BackupResult> CreateIncrementalBackupAsync(
+        string destination,
+        string baseBackupPath,
+        bool includeCodex,
+        bool includeBridge,
+        IProgress<BackupProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!includeCodex && !includeBridge) throw new InvalidOperationException("请至少选择一项备份内容。");
+        destination = Path.GetFullPath(destination);
+        baseBackupPath = Path.GetFullPath(baseBackupPath);
+        if (destination.Equals(baseBackupPath, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("增量备份不能覆盖它所依赖的基础备份。");
+        var baseSnapshot = await ResolveBackupChainAsync(baseBackupPath, progress, cancellationToken);
+        var sources = GetSources(includeCodex, includeBridge);
+        foreach (var source in sources.Where(source => Directory.Exists(source.Root)))
+            if (IsWithin(destination, source.Root)) throw new InvalidOperationException("备份文件不能保存在被备份的数据目录内。");
+
+        progress?.Report(new BackupProgress("正在比较基础备份", 0, 0, 0, 0));
+        var scan = await Task.Run(() => EnumerateFiles(sources, cancellationToken), cancellationToken);
+        var manifest = NewManifest(includeCodex, includeBridge);
+        manifest.BackupType = BackupTypes.Incremental;
+        manifest.BaseBackupId = baseSnapshot.Manifest.BackupId;
+        manifest.BaseBackupFile = Path.GetFileName(baseBackupPath);
+        manifest.ExcludedRuntimeFiles.AddRange(scan.ExcludedRuntimeFiles);
+        manifest.Failures.AddRange(scan.Failures);
+
+        var current = new Dictionary<string, BackupFileRecord>(StringComparer.OrdinalIgnoreCase);
+        var changedSources = new List<SourceFile>();
+        for (var index = 0; index < scan.Files.Count; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var file = scan.Files[index];
+            progress?.Report(new BackupProgress("正在计算变化内容", index, scan.Files.Count, index, scan.Files.Count));
+            try
+            {
+                await using var capture = await OpenCaptureAsync(file, cancellationToken);
+                var hash = Convert.ToHexString(await SHA256.HashDataAsync(capture.Stream, cancellationToken)).ToLowerInvariant();
+                var record = CreateRecord(file, file.Size, hash);
+                current[file.ArchivePath] = record;
+                if (!baseSnapshot.Files.TryGetValue(file.ArchivePath, out var previous) ||
+                    previous.Record.Size != record.Size || !previous.Record.Sha256.Equals(hash, StringComparison.OrdinalIgnoreCase))
+                    changedSources.Add(file);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                var failure = CreateFailure(file.FullPath, file.ArchivePath, file.Classification, exception);
+                manifest.Failures.Add(failure);
+                LogFailure(failure);
+            }
+        }
+        manifest.DeletedFiles = baseSnapshot.Files.Keys.Where(path =>
+            IsIncludedRoot(path, includeCodex, includeBridge) && !current.ContainsKey(path))
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToList();
+
+        var temporary = destination + $".tmp-{Guid.NewGuid():N}";
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        try
+        {
+            await using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, 131072, true))
+            using (var archive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: false))
+            {
+                long processedBytes = 0;
+                var totalBytes = changedSources.Sum(file => file.Size);
+                for (var index = 0; index < changedSources.Count; index++)
+                {
+                    var file = changedSources[index];
+                    cancellationToken.ThrowIfCancellationRequested();
+                    try
+                    {
+                        await using var capture = await OpenCaptureAsync(file, cancellationToken);
+                        var entry = archive.CreateEntry(file.ArchivePath, CompressionLevel.Optimal);
+                        entry.LastWriteTime = ClampZipTime(file.LastWriteTime);
+                        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                        await using var entryStream = entry.Open();
+                        var buffer = new byte[131072];
+                        long fileBytes = 0;
+                        int read;
+                        while ((read = await capture.Stream.ReadAsync(buffer, cancellationToken)) > 0)
+                        {
+                            await entryStream.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                            hash.AppendData(buffer, 0, read);
+                            processedBytes += read;
+                            fileBytes += read;
+                        }
+                        manifest.Files.Add(CreateRecord(file, fileBytes, Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant()));
+                        progress?.Report(new BackupProgress("正在保存变化内容", index + 1, changedSources.Count, processedBytes, totalBytes));
+                    }
+                    catch (Exception exception) when (exception is not OperationCanceledException)
+                    {
+                        var failure = CreateFailure(file.FullPath, file.ArchivePath, file.Classification, exception);
+                        manifest.Failures.Add(failure);
+                        LogFailure(failure);
+                    }
+                }
+                manifest.ChangedFiles = manifest.Files.Select(CloneRecord).ToList();
+                manifest.CriticalFiles = manifest.Files.Where(file => file.IsCritical).Select(file => file.RelativePath).ToList();
+                manifest.OptionalFiles = manifest.Files.Where(file => !file.IsCritical).Select(file => file.RelativePath).ToList();
+                manifest.FileCount = manifest.Files.Count;
+                manifest.TotalSize = manifest.Files.Sum(file => file.Size);
+                FinalizeManifest(manifest, manifest.Files.Select(file => file.RelativePath).ToHashSet(StringComparer.OrdinalIgnoreCase));
+                manifest.CanRestore = baseSnapshot.Files.Count > 0 || manifest.Files.Count > 0 || manifest.DeletedFiles.Count > 0;
+                if (manifest.CanRestore && manifest.Status == BackupStatuses.Incomplete) manifest.Status = BackupStatuses.Complete;
+                manifest.ManifestHash = CalculateManifestHash(manifest);
+                var manifestEntry = archive.CreateEntry("manifest.json", CompressionLevel.Optimal);
+                await using var manifestStream = manifestEntry.Open();
+                await JsonSerializer.SerializeAsync(manifestStream, manifest, JsonOptions, cancellationToken);
+            }
+            File.Move(temporary, destination, overwrite: true);
+            return new BackupResult { FilePath = destination, Manifest = manifest };
+        }
+        catch
+        {
+            TryDeleteFile(temporary);
+            throw;
+        }
+    }
+
+    public async Task<BackupInspection> InspectBackupAsync(
+        string backupPath,
+        IProgress<BackupProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        var snapshot = await ResolveBackupChainAsync(backupPath, progress, cancellationToken);
+        var conversations = new List<BackupConversationItem>();
+        foreach (var file in snapshot.Files.Values.Where(file => file.Record.Module == BackupModules.Sessions &&
+                                                                  file.Record.RelativePath.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase)))
+            conversations.Add(await ReadConversationInfoAsync(file, cancellationToken));
+        var projectFile = snapshot.Files.Values.FirstOrDefault(file => file.Record.Module == BackupModules.Projects);
+        return new BackupInspection
+        {
+            Manifest = snapshot.Manifest,
+            EffectiveFiles = snapshot.Files.Values.Select(file => CloneRecord(file.Record)).ToList(),
+            Conversations = conversations.OrderBy(item => item.ProjectName).ThenByDescending(item => item.Time).ToList(),
+            ChainLength = snapshot.ChainLength,
+            DeletedFiles = snapshot.DeletedFiles.ToList(),
+            ProjectCount = projectFile is null ? 0 : await ReadArrayCountAsync(projectFile, "projects", cancellationToken)
+        };
     }
 
     public async Task<BackupManifest> ReadAndValidateAsync(
@@ -202,6 +345,9 @@ public sealed class BackupService
             if (!inferredManifest && (manifest.FormatVersion < OldestSupportedFormatVersion || manifest.FormatVersion > CurrentFormatVersion))
                 throw new InvalidDataException($"不支持的备份格式版本：{manifest.FormatVersion}。");
             NormalizeManifest(manifest);
+            if (!inferredManifest && manifest.FormatVersion >= 3 &&
+                (!IsValidSha256(manifest.ManifestHash) || !manifest.ManifestHash.Equals(CalculateManifestHash(manifest), StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidDataException("备份 manifest 校验失败，文件可能已损坏或被修改。");
             if (inferredManifest)
                 AddValidationIssue(manifest, "manifest.json", "", "manifest 缺失；已根据安全路径识别可恢复数据。");
 
@@ -278,6 +424,12 @@ public sealed class BackupService
             }
 
             FinalizeManifest(manifest, validPaths);
+            if (manifest.BackupType.Equals(BackupTypes.Incremental, StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrWhiteSpace(manifest.BaseBackupId))
+            {
+                manifest.CanRestore = true;
+                if (manifest.Status == BackupStatuses.Incomplete) manifest.Status = BackupStatuses.Complete;
+            }
             if (!manifest.CanRestore)
                 throw new InvalidDataException("备份中没有任何能够安全识别和读取的持久化数据。");
             return manifest;
@@ -301,14 +453,14 @@ public sealed class BackupService
         CancellationToken cancellationToken = default)
     {
         if (!options.RestoreCodex && !options.RestoreBridge) throw new InvalidOperationException("请至少选择一项恢复内容。");
-        var manifest = await ReadAndValidateAsync(backupPath, progress, cancellationToken);
+        var snapshot = await ResolveBackupChainAsync(backupPath, progress, cancellationToken);
+        var manifest = snapshot.Manifest;
         if (options.RestoreCodex && !manifest.IncludedCodex) throw new InvalidOperationException("此备份不包含 Codex 数据。");
         if (options.RestoreBridge && !manifest.IncludedBridge) throw new InvalidOperationException("此备份不包含 Bridge 数据。");
 
-        var selectedRecords = manifest.Files.Where(file => IsSelected(file.RelativePath, options) &&
-                                                           !IsExcludedRuntimePath(file.RelativePath) &&
-                                                           !manifest.ValidationIssues.Any(issue => issue.RelativePath.Equals(file.RelativePath, StringComparison.OrdinalIgnoreCase)))
-                                            .ToList();
+        var selectedRecords = snapshot.Files.Values.Where(file => IsSelected(file.Record, options) &&
+                                                                  !IsExcludedRuntimePath(file.Record.RelativePath))
+                                                   .ToList();
         if (selectedRecords.Count == 0) throw new InvalidDataException("所选范围内没有可安全恢复的数据。");
 
         var warnings = manifest.Failures.Where(failure => IsSelected(failure.RelativePath, options))
@@ -334,8 +486,9 @@ public sealed class BackupService
         var preRestore = "";
         try
         {
-            progress?.Report(new BackupProgress("正在解压并分析恢复模块", 0, selectedRecords.Count, 0, selectedRecords.Sum(file => file.Size)));
-            await ExtractRecoverableAsync(backupPath, selectedRecords, stagingRoot, extracted, warnings, progress, cancellationToken);
+            progress?.Report(new BackupProgress("正在解压并分析恢复模块", 0, selectedRecords.Count, 0, selectedRecords.Sum(file => file.Record.Size)));
+            foreach (var archiveGroup in selectedRecords.GroupBy(file => file.ArchivePath, StringComparer.OrdinalIgnoreCase))
+                await ExtractRecoverableAsync(archiveGroup.Key, archiveGroup.Select(file => file.Record).ToList(), stagingRoot, extracted, warnings, progress, cancellationToken);
             if (extracted.Count == 0) throw new InvalidDataException("所选范围内的文件均无法安全解压或校验。");
 
             Directory.CreateDirectory(options.PreRestoreDirectory);
@@ -363,53 +516,51 @@ public sealed class BackupService
             var succeededModules = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var failedModules = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var restoredFiles = 0;
-            foreach (var moduleGroup in extracted.GroupBy(item => item.Record.Module, StringComparer.OrdinalIgnoreCase))
+            var rollbackRoot = Path.Combine(tempRoot, "rollback");
+            Directory.CreateDirectory(rollbackRoot);
+            var rollback = new List<RollbackEntry>();
+            try
             {
-                var moduleRestored = false;
-                foreach (var item in moduleGroup)
+                foreach (var item in extracted)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+                    var target = GetRestoreTarget(item.Record.RelativePath);
+                    if (target is null) continue;
+                    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                    if (!options.Replace && File.Exists(target))
+                    {
+                        succeededModules.Add(item.Record.Module);
+                        continue;
+                    }
+                    rollback.Add(CaptureRollback(target, rollbackRoot, rollback.Count));
+                    var incoming = target + $".restore-new-{Guid.NewGuid():N}";
                     try
                     {
-                        var target = GetRestoreTarget(item.Record.RelativePath);
-                        if (target is null) continue;
-                        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-                        if (!options.Replace && File.Exists(target))
-                        {
-                            moduleRestored = true;
-                            continue;
-                        }
-                        var incoming = target + $".restore-new-{Guid.NewGuid():N}";
-                        try
-                        {
-                            File.Copy(item.StagingPath, incoming, overwrite: false);
-                            File.Move(incoming, target, overwrite: true);
-                        }
-                        finally
-                        {
-                            TryDeleteFile(incoming);
-                        }
-                        File.SetLastWriteTimeUtc(target, item.Record.LastWriteTime.UtcDateTime);
-                        restoredFiles++;
-                        moduleRestored = true;
+                        File.Copy(item.StagingPath, incoming, overwrite: false);
+                        File.Move(incoming, target, overwrite: true);
                     }
-                    catch (Exception exception) when (exception is not OperationCanceledException)
-                    {
-                        warnings.Add(new BackupRestoreWarning
-                        {
-                            RelativePath = item.Record.RelativePath,
-                            Module = item.Record.Module,
-                            Error = $"{exception.GetType().Name}: {exception.Message}",
-                            AffectsOtherModules = false
-                        });
-                    }
+                    finally { TryDeleteFile(incoming); }
+                    File.SetLastWriteTimeUtc(target, item.Record.LastWriteTime.UtcDateTime);
+                    restoredFiles++;
+                    succeededModules.Add(item.Record.Module);
                 }
-                if (moduleRestored) succeededModules.Add(moduleGroup.Key);
-                else failedModules.Add(moduleGroup.Key);
-            }
 
-            foreach (var module in manifest.Modules.Where(module => IsModuleSelected(module.Module, options) && !module.CanRestore))
-                failedModules.Add(module.Module);
+                if (options.Replace && options.RestoreDeletedFiles)
+                    foreach (var path in snapshot.DeletedFiles.Where(path => IsSelected(path, options)))
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        var target = GetRestoreTarget(path);
+                        if (target is null || !File.Exists(target)) continue;
+                        rollback.Add(CaptureRollback(target, rollbackRoot, rollback.Count));
+                        File.Delete(target);
+                        succeededModules.Add(Classify(path).Module);
+                    }
+            }
+            catch
+            {
+                RollbackChanges(rollback);
+                throw;
+            }
 
             if (succeededModules.Count == 0) throw new IOException("没有任何数据模块恢复成功。");
 
@@ -455,6 +606,196 @@ public sealed class BackupService
         }
     }
 
+    private async Task<ChainSnapshot> ResolveBackupChainAsync(
+        string backupPath,
+        IProgress<BackupProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        var layers = new List<(string Path, BackupManifest Manifest)>();
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var currentPath = Path.GetFullPath(backupPath);
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!visited.Add(currentPath)) throw new InvalidDataException("增量备份链包含循环引用。");
+            if (!File.Exists(currentPath)) throw new FileNotFoundException("找不到备份链中的基础备份。", currentPath);
+            var manifest = await ReadAndValidateAsync(currentPath, progress, cancellationToken);
+            layers.Add((currentPath, manifest));
+            if (!manifest.BackupType.Equals(BackupTypes.Incremental, StringComparison.OrdinalIgnoreCase)) break;
+            if (string.IsNullOrWhiteSpace(manifest.BaseBackupId)) throw new InvalidDataException("增量备份缺少基础备份 ID。");
+            currentPath = await FindBaseBackupAsync(currentPath, manifest, progress, cancellationToken);
+        }
+        layers.Reverse();
+        for (var index = 1; index < layers.Count; index++)
+            if (!layers[index].Manifest.BaseBackupId.Equals(layers[index - 1].Manifest.BackupId, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException($"增量备份链不连续：{Path.GetFileName(layers[index].Path)}。");
+
+        var files = new Dictionary<string, ChainFile>(StringComparer.OrdinalIgnoreCase);
+        var deleted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var layer in layers)
+        {
+            foreach (var path in layer.Manifest.DeletedFiles.Select(NormalizeArchivePath))
+            {
+                files.Remove(path);
+                deleted.Add(path);
+            }
+            var invalid = layer.Manifest.ValidationIssues.Select(issue => NormalizeArchivePath(issue.RelativePath)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var record in layer.Manifest.Files.Where(record => !invalid.Contains(NormalizeArchivePath(record.RelativePath))))
+            {
+                var path = NormalizeArchivePath(record.RelativePath);
+                files[path] = new ChainFile(CloneRecord(record), layer.Path);
+                deleted.Remove(path);
+            }
+        }
+        return new ChainSnapshot(layers[^1].Manifest, files, deleted, layers.Count);
+    }
+
+    private async Task<string> FindBaseBackupAsync(
+        string incrementalPath,
+        BackupManifest manifest,
+        IProgress<BackupProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        var directory = Path.GetDirectoryName(incrementalPath)!;
+        if (!string.IsNullOrWhiteSpace(manifest.BaseBackupFile))
+        {
+            var direct = Path.GetFullPath(Path.Combine(directory, Path.GetFileName(manifest.BaseBackupFile)));
+            if (File.Exists(direct)) return direct;
+        }
+        foreach (var candidate in Directory.EnumerateFiles(directory, "*.clcbak", SearchOption.TopDirectoryOnly)
+                                           .Where(path => !path.Equals(incrementalPath, StringComparison.OrdinalIgnoreCase)))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var candidateManifest = await ReadAndValidateAsync(candidate, progress, cancellationToken);
+                if (candidateManifest.BackupId.Equals(manifest.BaseBackupId, StringComparison.OrdinalIgnoreCase)) return candidate;
+            }
+            catch (InvalidDataException) { }
+        }
+        throw new FileNotFoundException($"找不到基础备份 {manifest.BaseBackupId}。请将备份链文件放在同一目录。", manifest.BaseBackupFile);
+    }
+
+    private static BackupFileRecord CreateRecord(SourceFile file, long size, string sha256) => new()
+    {
+        RelativePath = file.ArchivePath,
+        Size = size,
+        Sha256 = sha256,
+        LastWriteTime = file.LastWriteTime,
+        Category = file.Classification.Category,
+        Module = file.Classification.Module,
+        IsCritical = file.Classification.IsCritical
+    };
+
+    private static BackupFileRecord CloneRecord(BackupFileRecord record) => new()
+    {
+        RelativePath = record.RelativePath,
+        Size = record.Size,
+        Sha256 = record.Sha256,
+        LastWriteTime = record.LastWriteTime,
+        Category = record.Category,
+        Module = record.Module,
+        IsCritical = record.IsCritical
+    };
+
+    private static string CalculateManifestHash(BackupManifest manifest)
+    {
+        var lines = new List<string>
+        {
+            manifest.FormatVersion.ToString(), manifest.BackupId, manifest.BackupType,
+            manifest.BaseBackupId, manifest.BaseBackupFile, manifest.CreatedAt.ToUniversalTime().ToString("O")
+        };
+        lines.AddRange(manifest.Files.OrderBy(file => file.RelativePath, StringComparer.OrdinalIgnoreCase)
+            .Select(file => $"F|{NormalizeArchivePath(file.RelativePath)}|{file.Size}|{file.Sha256}|{file.LastWriteTime.ToUniversalTime():O}|{file.Module}"));
+        lines.AddRange(manifest.DeletedFiles.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).Select(path => $"D|{NormalizeArchivePath(path)}"));
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('\n', lines)))).ToLowerInvariant();
+    }
+
+    private static bool IsIncludedRoot(string path, bool includeCodex, bool includeBridge) =>
+        includeCodex && NormalizeArchivePath(path).StartsWith("codex/", StringComparison.OrdinalIgnoreCase) ||
+        includeBridge && NormalizeArchivePath(path).StartsWith("bridge/", StringComparison.OrdinalIgnoreCase);
+
+    private static RollbackEntry CaptureRollback(string target, string rollbackRoot, int index)
+    {
+        if (!File.Exists(target)) return new RollbackEntry(target, null);
+        var backup = Path.Combine(rollbackRoot, $"{index:D8}.rollback");
+        File.Copy(target, backup, overwrite: false);
+        return new RollbackEntry(target, backup);
+    }
+
+    private static void RollbackChanges(IEnumerable<RollbackEntry> entries)
+    {
+        foreach (var entry in entries.Reverse())
+        {
+            if (entry.BackupPath is null) TryDeleteFile(entry.TargetPath);
+            else
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(entry.TargetPath)!);
+                File.Copy(entry.BackupPath, entry.TargetPath, overwrite: true);
+            }
+        }
+    }
+
+    private static async Task<BackupConversationItem> ReadConversationInfoAsync(ChainFile file, CancellationToken cancellationToken)
+    {
+        var project = "未分类项目";
+        var title = Path.GetFileNameWithoutExtension(file.Record.RelativePath);
+        try
+        {
+            await using var input = new FileStream(file.ArchivePath, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, true);
+            using var archive = new ZipArchive(input, ZipArchiveMode.Read);
+            var entry = archive.Entries.First(item => NormalizeArchivePath(item.FullName).Equals(file.Record.RelativePath, StringComparison.OrdinalIgnoreCase));
+            await using var stream = entry.Open();
+            using var reader = new StreamReader(stream, Encoding.UTF8, true, 4096, leaveOpen: false);
+            for (var lineNumber = 0; lineNumber < 40; lineNumber++)
+            {
+                var line = await reader.ReadLineAsync(cancellationToken);
+                if (line is null) break;
+                try
+                {
+                    using var document = JsonDocument.Parse(line);
+                    var root = document.RootElement;
+                    if (!root.TryGetProperty("payload", out var payload)) continue;
+                    if (payload.TryGetProperty("cwd", out var cwd) && cwd.ValueKind == JsonValueKind.String)
+                    {
+                        var value = cwd.GetString();
+                        if (!string.IsNullOrWhiteSpace(value)) project = Path.GetFileName(value.TrimEnd('/', '\\'));
+                    }
+                    if (payload.TryGetProperty("message", out var message) && message.ValueKind == JsonValueKind.String)
+                    {
+                        var value = message.GetString()?.Trim();
+                        if (!string.IsNullOrWhiteSpace(value)) title = value.Length > 80 ? value[..80] + "…" : value;
+                    }
+                }
+                catch (JsonException) { }
+            }
+        }
+        catch (Exception exception) when (exception is IOException or InvalidDataException) { }
+        return new BackupConversationItem
+        {
+            RelativePath = file.Record.RelativePath,
+            ProjectName = string.IsNullOrWhiteSpace(project) ? "未分类项目" : project,
+            Title = title,
+            Time = file.Record.LastWriteTime.ToLocalTime().ToString("yyyy-MM-dd HH:mm")
+        };
+    }
+
+    private static async Task<int> ReadArrayCountAsync(ChainFile file, string propertyName, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var input = new FileStream(file.ArchivePath, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, true);
+            using var archive = new ZipArchive(input, ZipArchiveMode.Read);
+            var entry = archive.Entries.First(item => NormalizeArchivePath(item.FullName).Equals(file.Record.RelativePath, StringComparison.OrdinalIgnoreCase));
+            await using var stream = entry.Open();
+            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+            return document.RootElement.TryGetProperty(propertyName, out var array) && array.ValueKind == JsonValueKind.Array
+                ? array.GetArrayLength()
+                : 0;
+        }
+        catch (Exception exception) when (exception is IOException or JsonException) { return 0; }
+    }
+
     public static IReadOnlyList<string> GetExternalCodexProcesses()
     {
         var result = new List<string>();
@@ -474,6 +815,7 @@ public sealed class BackupService
 
     public static string GetModuleDisplayName(string module) => module switch
     {
+        BackupModules.Projects => "项目",
         BackupModules.ApplicationSettings => "应用设置",
         BackupModules.CodexSettings => "Codex 设置",
         BackupModules.Qq => "QQ 配置",
@@ -482,8 +824,10 @@ public sealed class BackupService
         BackupModules.Commands => "指令配置",
         BackupModules.MessageSync => "消息同步配置",
         BackupModules.ThreadState => "会话编号状态",
-        BackupModules.TaskCenter => "任务与项目",
+        BackupModules.TaskCenter => "Task 历史",
+        BackupModules.OpenClawSessions => "OpenClaw 会话",
         BackupModules.Sessions => "Codex 会话与历史",
+        BackupModules.Logs => "日志",
         BackupModules.OtherPersistentData => "其他持久化数据",
         BackupModules.RuntimeExcluded => "运行时文件（已跳过）",
         "runtime-reload" => "运行服务重载",
@@ -494,12 +838,14 @@ public sealed class BackupService
     {
         FormatVersion = CurrentFormatVersion,
         CreatedAt = DateTimeOffset.Now,
-        AppVersion = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.3.3",
+        AppVersion = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.3.4",
         CodexVersion = TryGetCodexVersion(),
         MachineName = Environment.MachineName,
         CodexHome = CodexHome,
         IncludedCodex = includeCodex,
-        IncludedBridge = includeBridge
+        IncludedBridge = includeBridge,
+        BackupId = Guid.NewGuid().ToString("N"),
+        BackupType = BackupTypes.Full
     };
 
     private List<BackupSource> GetSources(bool includeCodex, bool includeBridge)
@@ -509,7 +855,8 @@ public sealed class BackupService
         if (includeBridge)
         {
             result.Add(new BackupSource(BridgeLocalData, "bridge/local"));
-            if (!Path.GetFullPath(BridgeRoamingData).Equals(Path.GetFullPath(BridgeLocalData), StringComparison.OrdinalIgnoreCase))
+            if (!Path.GetFullPath(BridgeRoamingData).Equals(Path.GetFullPath(BridgeLocalData), StringComparison.OrdinalIgnoreCase) &&
+                !IsWithin(BridgeRoamingData, BridgeLocalData))
                 result.Add(new BackupSource(BridgeRoamingData, "bridge/roaming"));
         }
         return result;
@@ -714,6 +1061,9 @@ public sealed class BackupService
     {
         path = NormalizeArchivePath(path);
         return path.Equals("bridge/roaming/settings.json", StringComparison.OrdinalIgnoreCase) ||
+               path.Equals("bridge/local/config/settings.json", StringComparison.OrdinalIgnoreCase) ||
+               path.Equals("bridge/local/config/codex-settings.json", StringComparison.OrdinalIgnoreCase) ||
+               path.Equals("bridge/roaming/codex-settings.json", StringComparison.OrdinalIgnoreCase) ||
                path.Equals("bridge/local/bindings.json", StringComparison.OrdinalIgnoreCase) ||
                path.StartsWith("bridge/local/data/", StringComparison.OrdinalIgnoreCase) && path.EndsWith(".json", StringComparison.OrdinalIgnoreCase) ||
                path.Equals("codex/auth.json", StringComparison.OrdinalIgnoreCase) ||
@@ -789,6 +1139,15 @@ public sealed class BackupService
         manifest.MissingCriticalFiles ??= [];
         manifest.ValidationIssues ??= [];
         manifest.Modules ??= [];
+        manifest.ChangedFiles ??= [];
+        manifest.DeletedFiles ??= [];
+        if (string.IsNullOrWhiteSpace(manifest.BackupType)) manifest.BackupType = BackupTypes.Full;
+        if (string.IsNullOrWhiteSpace(manifest.BackupId))
+        {
+            var identity = string.Join('\n', manifest.Files.OrderBy(file => file.RelativePath, StringComparer.OrdinalIgnoreCase)
+                .Select(file => $"{NormalizeArchivePath(file.RelativePath)}|{file.Size}|{file.Sha256}"));
+            manifest.BackupId = "legacy-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity))).ToLowerInvariant()[..24];
+        }
         manifest.ValidationIssues.Clear();
         manifest.Modules.Clear();
         manifest.MissingCriticalFiles.Clear();
@@ -857,7 +1216,14 @@ public sealed class BackupService
         var path = NormalizeArchivePath(archivePath);
         if (IsExcludedRuntimePath(path)) return new FileClassification("运行时文件", BackupModules.RuntimeExcluded, false, true);
 
-        if (path.Equals("bridge/roaming/settings.json", StringComparison.OrdinalIgnoreCase))
+        if (path.Contains("/logs/", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".log", StringComparison.OrdinalIgnoreCase))
+            return new FileClassification("日志", BackupModules.Logs, false, false);
+        if (path.Equals("bridge/local/config/codex-settings.json", StringComparison.OrdinalIgnoreCase) ||
+            path.Equals("bridge/roaming/codex-settings.json", StringComparison.OrdinalIgnoreCase))
+            return new FileClassification("Codex 设置", BackupModules.CodexSettings, true, false);
+
+        if (path.Equals("bridge/roaming/settings.json", StringComparison.OrdinalIgnoreCase) ||
+            path.Equals("bridge/local/config/settings.json", StringComparison.OrdinalIgnoreCase))
             return new FileClassification("用户设置", BackupModules.ApplicationSettings, true, false);
         if (path.Equals("bridge/local/bindings.json", StringComparison.OrdinalIgnoreCase))
             return new FileClassification("会话绑定", BackupModules.Bindings, true, false);
@@ -865,12 +1231,14 @@ public sealed class BackupService
             return new FileClassification("指令配置", BackupModules.Commands, true, false);
         if (path.Equals("bridge/local/data/mirror-state.json", StringComparison.OrdinalIgnoreCase))
             return new FileClassification("消息同步配置", BackupModules.MessageSync, true, false);
-        if (path.Equals("bridge/local/data/tasks.json", StringComparison.OrdinalIgnoreCase) ||
-            path.Equals("bridge/local/data/projects.json", StringComparison.OrdinalIgnoreCase))
-            return new FileClassification("任务与项目", BackupModules.TaskCenter, true, false);
+        if (path.Equals("bridge/local/data/tasks.json", StringComparison.OrdinalIgnoreCase))
+            return new FileClassification("Task 历史", BackupModules.TaskCenter, true, false);
+        if (path.Equals("bridge/local/data/projects.json", StringComparison.OrdinalIgnoreCase))
+            return new FileClassification("项目", BackupModules.Projects, true, false);
+        if (path.Equals("bridge/local/data/openclaw-session-numbers.json", StringComparison.OrdinalIgnoreCase))
+            return new FileClassification("OpenClaw 会话", BackupModules.OpenClawSessions, true, false);
         if (path.Equals("bridge/local/data/conversation-numbers.json", StringComparison.OrdinalIgnoreCase) ||
-            path.Equals("bridge/local/data/thread-numbers.json", StringComparison.OrdinalIgnoreCase) ||
-            path.Equals("bridge/local/data/openclaw-session-numbers.json", StringComparison.OrdinalIgnoreCase))
+            path.Equals("bridge/local/data/thread-numbers.json", StringComparison.OrdinalIgnoreCase))
             return new FileClassification("会话编号状态", BackupModules.ThreadState, true, false);
         if (path.Contains("/secrets/qq", StringComparison.OrdinalIgnoreCase))
             return new FileClassification("QQ 凭据", BackupModules.Qq, true, false);
@@ -966,20 +1334,37 @@ public sealed class BackupService
             path.Equals(failed, StringComparison.OrdinalIgnoreCase);
     });
 
-    private static bool IsSelected(string path, RestoreOptions options) =>
-        options.RestoreCodex && NormalizeArchivePath(path).StartsWith("codex/", StringComparison.OrdinalIgnoreCase) ||
-        options.RestoreBridge && NormalizeArchivePath(path).StartsWith("bridge/", StringComparison.OrdinalIgnoreCase);
+    private static bool IsSelected(BackupFileRecord record, RestoreOptions options)
+    {
+        if (!IsSelected(record.RelativePath, options)) return false;
+        if (options.SelectedModules.Count > 0 && !options.SelectedModules.Contains(record.Module)) return false;
+        return record.Module != BackupModules.Sessions || options.SelectedPaths.Count == 0 ||
+               options.SelectedPaths.Contains(NormalizeArchivePath(record.RelativePath));
+    }
+
+    private static bool IsSelected(string path, RestoreOptions options)
+    {
+        path = NormalizeArchivePath(path);
+        var selectedByRoot = options.RestoreCodex && path.StartsWith("codex/", StringComparison.OrdinalIgnoreCase) ||
+                             options.RestoreBridge && path.StartsWith("bridge/", StringComparison.OrdinalIgnoreCase);
+        if (!selectedByRoot) return false;
+        var module = Classify(path).Module;
+        if (options.SelectedModules.Count > 0 && !options.SelectedModules.Contains(module)) return false;
+        return module != BackupModules.Sessions || options.SelectedPaths.Count == 0 || options.SelectedPaths.Contains(path);
+    }
 
     private static bool IsModuleSelected(string module, RestoreOptions options) => module == BackupModules.CodexSettings ||
         module == BackupModules.Sessions ? options.RestoreCodex :
         module == BackupModules.ApplicationSettings || module == BackupModules.Qq || module == BackupModules.Telegram ||
         module == BackupModules.Bindings || module == BackupModules.Commands || module == BackupModules.MessageSync ||
-        module == BackupModules.ThreadState || module == BackupModules.TaskCenter ? options.RestoreBridge : options.RestoreCodex || options.RestoreBridge;
+        module == BackupModules.ThreadState || module == BackupModules.TaskCenter || module == BackupModules.Projects ||
+        module == BackupModules.OpenClawSessions || module == BackupModules.Logs ? options.RestoreBridge : options.RestoreCodex || options.RestoreBridge;
 
     private static int GetModuleSortOrder(string module) => module switch
     {
-        BackupModules.ApplicationSettings => 0,
-        BackupModules.CodexSettings => 1,
+        BackupModules.Projects => 0,
+        BackupModules.ApplicationSettings => 1,
+        BackupModules.CodexSettings => 2,
         BackupModules.Qq => 2,
         BackupModules.Telegram => 3,
         BackupModules.Bindings => 4,
@@ -987,8 +1372,10 @@ public sealed class BackupService
         BackupModules.MessageSync => 6,
         BackupModules.ThreadState => 7,
         BackupModules.TaskCenter => 8,
-        BackupModules.Sessions => 9,
-        _ => 9
+        BackupModules.OpenClawSessions => 9,
+        BackupModules.Sessions => 10,
+        BackupModules.Logs => 11,
+        _ => 12
     };
 
     private static async Task<FileStream> OpenReadWithRetryAsync(string path, CancellationToken cancellationToken)
@@ -1044,6 +1431,13 @@ public sealed class BackupService
     private sealed record BackupSource(string Root, string Prefix);
     private sealed record FileClassification(string Category, string Module, bool IsCritical, bool Excluded);
     private sealed record SourceFile(string FullPath, string ArchivePath, long Size, DateTimeOffset LastWriteTime, FileClassification Classification);
+    private sealed record ChainFile(BackupFileRecord Record, string ArchivePath);
+    private sealed record ChainSnapshot(
+        BackupManifest Manifest,
+        Dictionary<string, ChainFile> Files,
+        HashSet<string> DeletedFiles,
+        int ChainLength);
+    private sealed record RollbackEntry(string TargetPath, string? BackupPath);
     private sealed class ScanResult
     {
         public List<SourceFile> Files { get; } = [];

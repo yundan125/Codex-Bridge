@@ -19,7 +19,7 @@ func buildTurnStartParams(threadID, text string, options TurnStartOptions) (map[
 	if err != nil {
 		return nil, turnStartDiagnostic{}, err
 	}
-	sandboxPolicy, sandboxType, networkAccess, err := toAppServerSandboxPolicy(options.SandboxMode, options.CWD)
+	sandboxPolicy, sandboxType, networkAccess, err := toAppServerSandboxPolicy(options.SandboxMode, options.CWD, options.NetworkAccess)
 	if err != nil {
 		return nil, turnStartDiagnostic{}, err
 	}
@@ -61,18 +61,22 @@ func toAppServerApprovalPolicy(policy security.ApprovalPolicy) (string, error) {
 	}
 }
 
-func toAppServerSandboxPolicy(mode security.SandboxMode, cwd string) (map[string]any, string, bool, error) {
+func toAppServerSandboxPolicy(mode security.SandboxMode, cwd string, networkOverride *bool) (map[string]any, string, bool, error) {
+	network := false
+	if networkOverride != nil {
+		network = *networkOverride
+	}
 	switch mode {
 	case security.SandboxDangerFullAccess:
 		return map[string]any{"type": "dangerFullAccess"}, "dangerFullAccess", true, nil
 	case security.SandboxReadOnly:
-		return map[string]any{"type": "readOnly", "networkAccess": false}, "readOnly", false, nil
+		return map[string]any{"type": "readOnly", "networkAccess": network}, "readOnly", network, nil
 	case security.SandboxWorkspaceWrite:
-		policy := map[string]any{"type": "workspaceWrite", "networkAccess": false}
+		policy := map[string]any{"type": "workspaceWrite", "networkAccess": network}
 		if root := strings.TrimSpace(cwd); root != "" {
 			policy["writableRoots"] = []string{root}
 		}
-		return policy, "workspaceWrite", false, nil
+		return policy, "workspaceWrite", network, nil
 	default:
 		return nil, "", false, fmt.Errorf("unsupported sandbox mode: %s", mode)
 	}

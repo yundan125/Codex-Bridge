@@ -47,6 +47,13 @@ public sealed class DaemonProcessManager(LogService logs) : IAsyncDisposable
         startInfo.ArgumentList.Add(Token);
         startInfo.ArgumentList.Add("--sandbox");
         startInfo.ArgumentList.Add(settings.SandboxMode is "read-only" ? "read-only" : "workspace-write");
+        var paths = AppDataPathService.Shared;
+        startInfo.ArgumentList.Add("--data-dir");
+        startInfo.ArgumentList.Add(paths.GetDataDirectory());
+        startInfo.ArgumentList.Add("--log-dir");
+        startInfo.ArgumentList.Add(paths.GetLogDirectory());
+        startInfo.ArgumentList.Add("--codex-settings");
+        startInfo.ArgumentList.Add(paths.GetCodexSettingsFile());
         var effectiveCodexPath = codexPathOverride is not null
             ? codexPathOverride.Trim()
             : CodexPathSettings.EffectiveSavedPath(settings);

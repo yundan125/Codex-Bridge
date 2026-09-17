@@ -22,6 +22,13 @@ public sealed class BackupManifest
     public List<string> MissingCriticalFiles { get; set; } = [];
     public List<BackupValidationIssue> ValidationIssues { get; set; } = [];
     public List<BackupModuleInfo> Modules { get; set; } = [];
+    public string BackupId { get; set; } = "";
+    public string BackupType { get; set; } = BackupTypes.Full;
+    public string BaseBackupId { get; set; } = "";
+    public string BaseBackupFile { get; set; } = "";
+    public List<BackupFileRecord> ChangedFiles { get; set; } = [];
+    public List<string> DeletedFiles { get; set; } = [];
+    public string ManifestHash { get; set; } = "";
 }
 
 public sealed class BackupFileRecord
@@ -68,6 +75,7 @@ public sealed class BackupModuleInfo
 
 public static class BackupModules
 {
+    public const string Projects = "projects";
     public const string ApplicationSettings = "application-settings";
     public const string CodexSettings = "codex-settings";
     public const string Qq = "qq";
@@ -77,7 +85,9 @@ public static class BackupModules
     public const string MessageSync = "message-sync";
     public const string ThreadState = "thread-state";
     public const string TaskCenter = "task-center";
+    public const string OpenClawSessions = "openclaw-sessions";
     public const string Sessions = "sessions";
+    public const string Logs = "logs";
     public const string OtherPersistentData = "other-persistent-data";
     public const string RuntimeExcluded = "runtime-excluded";
 }
@@ -87,6 +97,12 @@ public static class BackupStatuses
     public const string Complete = "Complete";
     public const string CompleteWithWarnings = "CompleteWithWarnings";
     public const string Incomplete = "Incomplete";
+}
+
+public static class BackupTypes
+{
+    public const string Full = "Full";
+    public const string Incremental = "Incremental";
 }
 
 public sealed record BackupProgress(string Stage, int ProcessedFiles, int TotalFiles, long ProcessedBytes, long TotalBytes)
@@ -115,6 +131,28 @@ public sealed class RestoreOptions
     public bool Replace { get; set; } = true;
     public bool VerifyNoExternalCodex { get; set; } = true;
     public required string PreRestoreDirectory { get; set; }
+    public HashSet<string> SelectedModules { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public HashSet<string> SelectedPaths { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public bool RestoreDeletedFiles { get; set; } = true;
+}
+
+public sealed class BackupInspection
+{
+    public required BackupManifest Manifest { get; init; }
+    public List<BackupFileRecord> EffectiveFiles { get; init; } = [];
+    public List<BackupConversationItem> Conversations { get; init; } = [];
+    public int ChainLength { get; init; }
+    public List<string> DeletedFiles { get; init; } = [];
+    public int ProjectCount { get; init; }
+}
+
+public sealed class BackupConversationItem
+{
+    public string RelativePath { get; set; } = "";
+    public string ProjectName { get; set; } = "未分类项目";
+    public string Title { get; set; } = "Codex 会话";
+    public string Time { get; set; } = "";
+    public bool IsSelected { get; set; } = true;
 }
 
 public sealed class RestoreResult

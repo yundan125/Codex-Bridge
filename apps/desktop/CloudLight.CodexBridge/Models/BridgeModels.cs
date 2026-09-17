@@ -25,6 +25,30 @@ public sealed class BridgeStatus
     public bool RemoteApproval { get; set; }
 }
 
+public sealed class CodexModelListResponse
+{
+    public List<CodexModelInfo> Data { get; set; } = [];
+    public string? NextCursor { get; set; }
+}
+
+public sealed class CodexModelInfo
+{
+    public string Id { get; set; } = "";
+    public string Model { get; set; } = "";
+    public string DisplayName { get; set; } = "";
+    public string Description { get; set; } = "";
+    public bool Hidden { get; set; }
+    public bool IsDefault { get; set; }
+    public string DefaultReasoningEffort { get; set; } = "medium";
+    public List<CodexReasoningEffortInfo> SupportedReasoningEfforts { get; set; } = [];
+}
+
+public sealed class CodexReasoningEffortInfo
+{
+    public string ReasoningEffort { get; set; } = "";
+    public string Description { get; set; } = "";
+}
+
 public sealed class ThreadListResponse
 {
     public List<ThreadSummary> Threads { get; set; } = [];

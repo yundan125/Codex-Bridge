@@ -41,6 +41,7 @@ type TurnStartOptions struct {
 	ReasoningEffort   string
 	ApprovalPolicy    security.ApprovalPolicy
 	SandboxMode       security.SandboxMode
+	NetworkAccess     *bool
 }
 
 type RPCError struct {
@@ -243,6 +244,21 @@ func (c *Client) ThreadList(ctx context.Context, limit int, cursor string) (map[
 	return c.request(ctx, "thread/list", params)
 }
 
+// ModelList returns the account-scoped model catalog advertised by the
+// connected Codex app-server. The desktop must use this instead of assuming
+// model names because availability and supported reasoning efforts change
+// independently of Bridge releases.
+func (c *Client) ModelList(ctx context.Context, limit int, cursor string) (map[string]any, error) {
+	params := map[string]any{"includeHidden": false}
+	if limit > 0 {
+		params["limit"] = limit
+	}
+	if value := strings.TrimSpace(cursor); value != "" {
+		params["cursor"] = value
+	}
+	return c.request(ctx, "model/list", params)
+}
+
 func (c *Client) ThreadRead(ctx context.Context, threadID string, includeTurns bool) (map[string]any, error) {
 	return c.request(ctx, "thread/read", map[string]any{
 		"threadId":     threadID,
@@ -331,6 +347,21 @@ func (c *Client) ThreadResume(ctx context.Context, threadID, cwd string) (map[st
 		params["cwd"] = strings.TrimSpace(cwd)
 	}
 	return c.request(ctx, "thread/resume", params)
+}
+
+func (c *Client) ThreadStart(ctx context.Context, cwd, model string, sandbox security.SandboxMode) (map[string]any, error) {
+	params := map[string]any{
+		"approvalPolicy": string(security.ApprovalOnRequest),
+		"sandbox":        string(sandbox),
+		"ephemeral":      false,
+	}
+	if value := strings.TrimSpace(cwd); value != "" {
+		params["cwd"] = value
+	}
+	if value := strings.TrimSpace(model); value != "" {
+		params["model"] = value
+	}
+	return c.request(ctx, "thread/start", params)
 }
 
 func (c *Client) TurnStart(ctx context.Context, threadID, text string, options TurnStartOptions) (map[string]any, error) {

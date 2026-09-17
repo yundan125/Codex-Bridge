@@ -28,7 +28,7 @@ import (
 	"cloudlight.dev/codexbridge/bridge-daemon/internal/taskcenter"
 )
 
-var version = "1.3.3"
+var version = "1.3.4"
 
 func main() {
 	options := config.Options{Version: version}
@@ -36,13 +36,16 @@ func main() {
 	flag.StringVar(&options.Token, "token", "", "local API bearer token")
 	flag.StringVar(&options.CodexPath, "codex-path", "", "optional Codex CLI executable path")
 	flag.StringVar(&options.SandboxMode, "sandbox", "workspace-write", "sandbox for new turns: read-only or workspace-write")
+	flag.StringVar(&options.DataDir, "data-dir", "", "application data directory")
+	flag.StringVar(&options.LogDir, "log-dir", "", "log directory")
+	flag.StringVar(&options.CodexSettingsFile, "codex-settings", "", "Codex default settings JSON file")
 	flag.Parse()
 	if err := options.Validate(); err != nil {
 		fmt.Fprintln(os.Stderr, "bridge-daemon:", err)
 		os.Exit(2)
 	}
 
-	paths, err := config.UserPaths()
+	paths, err := config.UserPaths(options.DataDir, options.LogDir, options.CodexSettingsFile)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "bridge-daemon:", err)
 		os.Exit(1)
@@ -102,6 +105,7 @@ func main() {
 		_ = listener.Close()
 		os.Exit(1)
 	}
+	manager.SetCodexSettingsFile(paths.CodexSettingsFile)
 	controlService := control.NewService(manager, manager, conversationRegistry)
 	openClawService := openclaw.NewService(logger, broker, conversationRegistry)
 	taskService := taskcenter.NewService(projectRegistry, taskRegistry, broker, logger,

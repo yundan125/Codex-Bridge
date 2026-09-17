@@ -53,7 +53,9 @@ func New(token string, runtimeManager *bridgeruntime.Manager, controlService *co
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", server.health)
 	mux.HandleFunc("GET /api/v1/status", server.authorized(server.status))
+	mux.HandleFunc("GET /api/v1/codex/models", server.authorized(server.codexModels))
 	mux.HandleFunc("GET /api/v1/threads", server.authorized(server.threads))
+	mux.HandleFunc("POST /api/v1/threads", server.authorized(server.createThread))
 	mux.HandleFunc("GET /api/v1/threads/{threadId}", server.authorized(server.thread))
 	mux.HandleFunc("POST /api/v1/threads/{threadId}/turns", server.authorized(server.startTurn))
 	mux.HandleFunc("POST /api/v1/threads/{threadId}/persistence/verify", server.authorized(server.verifyThreadPersistence))
@@ -323,6 +325,26 @@ func (s *Server) status(response http.ResponseWriter, _ *http.Request) {
 	writeJSON(response, http.StatusOK, s.runtime.Status())
 }
 
+func (s *Server) codexModels(response http.ResponseWriter, request *http.Request) {
+	limit := 100
+	if raw := request.URL.Query().Get("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 200 {
+			writeError(response, http.StatusBadRequest, "invalid_limit", "limit 必须是 1 到 200 之间的整数")
+			return
+		}
+		limit = parsed
+	}
+	ctx, cancel := context.WithTimeout(request.Context(), 20*time.Second)
+	defer cancel()
+	result, err := s.runtime.ModelList(ctx, limit, request.URL.Query().Get("cursor"))
+	if err != nil {
+		s.writeCodexError(response, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, result)
+}
+
 func (s *Server) threads(response http.ResponseWriter, request *http.Request) {
 	limit := 50
 	if raw := request.URL.Query().Get("limit"); raw != "" {
@@ -341,6 +363,33 @@ func (s *Server) threads(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	writeJSON(response, http.StatusOK, result)
+}
+
+func (s *Server) createThread(response http.ResponseWriter, request *http.Request) {
+	var input struct {
+		WorkingDirectory string `json:"workingDirectory"`
+	}
+	if !decodeOptionalBody(response, request, 16*1024, &input) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(request.Context(), 20*time.Second)
+	defer cancel()
+	threadID, err := s.runtime.CreateThread(ctx, input.WorkingDirectory)
+	if err != nil {
+		s.writeCodexError(response, err)
+		return
+	}
+	detail, err := s.control.ReadThread(ctx, threadID, false)
+	if err != nil {
+		// thread/start succeeded; the list/read index can lag briefly behind the
+		// creation notification, so return a usable summary and let the desktop
+		// refresh fill in title/number metadata.
+		writeJSON(response, http.StatusCreated, control.ThreadSummary{
+			ThreadID: threadID, CWD: strings.TrimSpace(input.WorkingDirectory), Status: "idle",
+		})
+		return
+	}
+	writeJSON(response, http.StatusCreated, detail.ThreadSummary)
 }
 
 func (s *Server) thread(response http.ResponseWriter, request *http.Request) {

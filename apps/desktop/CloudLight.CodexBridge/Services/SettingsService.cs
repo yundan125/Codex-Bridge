@@ -13,12 +13,11 @@ public sealed class SettingsService
         NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals
     };
 
-    public SettingsService()
-        : this(
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CloudLight", "CodexBridge"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "CloudLight", "CodexBridge", "settings.json"))
-    {
-    }
+    private readonly AppDataPathService? _paths;
+    private readonly string? _dataDirectoryOverride;
+    private readonly string? _settingsFileOverride;
+
+    public SettingsService() => _paths = AppDataPathService.Shared;
 
     // Kept internal so migration tests can exercise the production load/save
     // path without reading or modifying the current Windows user's settings.
@@ -26,25 +25,37 @@ public sealed class SettingsService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(dataDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(settingsFile);
-        DataDirectory = dataDirectory;
-        SettingsFile = settingsFile;
+        _dataDirectoryOverride = Path.GetFullPath(dataDirectory);
+        _settingsFileOverride = Path.GetFullPath(settingsFile);
     }
 
-    public string DataDirectory { get; }
+    public string DataDirectory => _dataDirectoryOverride ?? _paths!.GetDataDirectory();
 
-    public string LogDirectory => Path.Combine(DataDirectory, "logs");
+    public string LogDirectory => _dataDirectoryOverride is null ? _paths!.GetLogDirectory() : Path.Combine(DataDirectory, "logs");
 
-    public string SettingsFile { get; }
+    public string BackupDirectory => _dataDirectoryOverride is null ? _paths!.GetBackupDirectory() : Path.Combine(DataDirectory, "backups");
+
+    public string ConfigDirectory => _settingsFileOverride is null ? _paths!.GetConfigDirectory() : Path.GetDirectoryName(SettingsFile)!;
+
+    public string SettingsFile => _settingsFileOverride ?? _paths!.GetSettingsFile();
 
     public string LastLoadWarning { get; private set; } = "";
 
     public async Task<UserSettings> LoadAsync()
     {
+        var loadFile = SettingsFile;
         var settingsExists = await Task.Run(() =>
         {
             Directory.CreateDirectory(DataDirectory);
             Directory.CreateDirectory(LogDirectory);
-            return File.Exists(SettingsFile);
+            Directory.CreateDirectory(ConfigDirectory);
+            if (File.Exists(loadFile)) return true;
+            if (_settingsFileOverride is not null) return false;
+            var legacy = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "CloudLight", "CodexBridge", "settings.json");
+            if (!File.Exists(legacy)) return false;
+            loadFile = legacy;
+            LastLoadWarning = $"检测到旧版本设置 {legacy}；迁移确认前将兼容读取该文件。";
+            return true;
         }).ConfigureAwait(false);
         if (!settingsExists)
         {
@@ -52,15 +63,15 @@ public sealed class SettingsService
         }
         try
         {
-            await using var stream = File.OpenRead(SettingsFile);
+            await using var stream = File.OpenRead(loadFile);
             return Normalize(await JsonSerializer.DeserializeAsync<UserSettings>(stream, JsonOptions).ConfigureAwait(false) ?? new UserSettings());
         }
         catch (Exception exception) when (exception is JsonException or NotSupportedException)
         {
-            var backup = SettingsFile + $".corrupt-{DateTime.Now:yyyyMMdd-HHmmss-fff}.bak";
+            var backup = loadFile + $".corrupt-{DateTime.Now:yyyyMMdd-HHmmss-fff}.bak";
             try
             {
-                File.Copy(SettingsFile, backup, overwrite: false);
+                File.Copy(loadFile, backup, overwrite: false);
                 LastLoadWarning = $"settings.json 无法解析，已保留原文件并备份到 {backup}。本次使用默认设置。";
             }
             catch (Exception backupException)
@@ -123,7 +134,7 @@ public sealed class SettingsService
 		NormalizeChannelProfiles(settings);
 		settings.ThreadRefreshIntervalSeconds = Math.Clamp(settings.ThreadRefreshIntervalSeconds, 10, 300);
 		settings.Theme = settings.Theme is "light" or "dark" ? settings.Theme : "system";
-		settings.LastPage = settings.LastPage is "overview" or "sessions" or "openclaw" or "qq" or "telegram" or "channels" or "commands" or "mirror" or "backup" or "settings" or "logs"
+		settings.LastPage = settings.LastPage is "overview" or "tasks" or "projects" or "sessions" or "codex-settings" or "openclaw" or "qq" or "telegram" or "channels" or "commands" or "openclaw-commands" or "mirror" or "backup" or "settings" or "logs"
 			? settings.LastPage
 			: "overview";
 		settings.WindowWidth = Math.Clamp(double.IsFinite(settings.WindowWidth) ? settings.WindowWidth : 1280, 1040, 3840);

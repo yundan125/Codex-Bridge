@@ -156,6 +156,7 @@ func (m *Manager) reconcileActivity(activity control.ThreadActivity) {
 }
 
 func (m *Manager) StartTurn(ctx context.Context, threadID string, request control.StartTurnRequest) (control.TurnAccepted, error) {
+	request = m.applyCodexDefaults(request)
 	threadID = strings.TrimSpace(threadID)
 	text := strings.TrimSpace(request.Text)
 	if threadID == "" {
@@ -300,14 +301,34 @@ func turnStartOptions(request control.StartTurnRequest, cwd, configuredSandboxMo
 	}
 	if isRemoteChannelTurn(request.Origin) {
 		options.ApprovalPolicy = security.ApprovalNever
-		options.SandboxMode = security.SandboxDangerFullAccess
-		return options, nil
 	}
-	sandboxMode, err := security.ParseSandboxMode(configuredSandboxMode)
+	requestedSandbox := configuredSandboxMode
+	// Keep the legacy unattended-channel behavior until the user has saved an
+	// explicit shared Codex permission mode. applyCodexDefaults supplies that
+	// explicit value for GUI, QQ and Telegram turns alike.
+	if isRemoteChannelTurn(request.Origin) && request.PermissionMode == nil {
+		requestedSandbox = string(security.SandboxDangerFullAccess)
+	}
+	if request.PermissionMode != nil && strings.TrimSpace(*request.PermissionMode) != "" {
+		requestedSandbox = strings.TrimSpace(*request.PermissionMode)
+	}
+	sandboxMode, err := security.ParseSandboxMode(requestedSandbox)
 	if err != nil {
 		return appserver.TurnStartOptions{}, err
 	}
 	options.SandboxMode = sandboxMode
+	if request.NetworkAccess != nil {
+		switch strings.ToLower(strings.TrimSpace(*request.NetworkAccess)) {
+		case "enabled", "allow", "allowed":
+			value := true
+			options.NetworkAccess = &value
+		case "disabled", "deny", "denied", "restricted":
+			value := false
+			options.NetworkAccess = &value
+		default:
+			return appserver.TurnStartOptions{}, fmt.Errorf("unsupported network access mode: %s", *request.NetworkAccess)
+		}
+	}
 	return options, nil
 }
 
