@@ -67,7 +67,7 @@ public sealed class BackupViewModel : ObservableObject
     public ICollectionView ConversationGroups { get; }
     public string CodexHome => _service.CodexHome;
     public string BridgeData => _service.BridgeLocalData;
-    public string AppVersion => Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.3.4";
+    public string AppVersion => Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.3.5";
 
     public bool IncludeCodex { get => _includeCodex; set => SetProperty(ref _includeCodex, value); }
     public bool IncludeBridge { get => _includeBridge; set => SetProperty(ref _includeBridge, value); }
@@ -85,7 +85,19 @@ public sealed class BackupViewModel : ObservableObject
     public bool RestoreTaskHistory { get => _restoreTaskHistory; set => SetRestoreFlag(ref _restoreTaskHistory, value); }
     public bool RestoreLogs { get => _restoreLogs; set => SetRestoreFlag(ref _restoreLogs, value); }
     public bool ReplaceMode { get => _replaceMode; set => SetProperty(ref _replaceMode, value); }
-    public bool Busy { get => _busy; private set { if (SetProperty(ref _busy, value)) OnPropertyChanged(nameof(BusyVisibility)); } }
+    public bool Busy
+    {
+        get => _busy;
+        private set
+        {
+            if (!SetProperty(ref _busy, value)) return;
+            OnPropertyChanged(nameof(BusyVisibility));
+            (CreateBackupCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+            (SelectBackupCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+            (RestoreCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+            (CancelBackupCommand as RelayCommand)?.RaiseCanExecuteChanged();
+        }
+    }
     public Visibility BusyVisibility => Busy ? Visibility.Visible : Visibility.Collapsed;
     public string SelectedBackup { get => _selectedBackup; private set => SetProperty(ref _selectedBackup, value); }
     public BackupManifest? SelectedManifest
@@ -118,34 +130,67 @@ public sealed class BackupViewModel : ObservableObject
 
     private async Task CreateBackupAsync()
     {
-        if (!IncludeCodex && !IncludeBridge) { OperationText = "请至少选择一项备份内容。"; return; }
-        var baseBackup = "";
-        if (IsIncremental)
+        OperationText = "准备创建备份…";
+        ProgressStage = "准备创建备份…";
+        ProgressPercent = 0;
+        if (!IncludeCodex && !IncludeBridge)
         {
-            var baseDialog = new Microsoft.Win32.OpenFileDialog
-            {
-                Title = "选择上一次完整或增量备份",
-                Filter = "CloudLight Codex Backup (*.clcbak)|*.clcbak",
-                InitialDirectory = Directory.Exists(_service.BackupDirectory) ? _service.BackupDirectory : null
-            };
-            if (baseDialog.ShowDialog() != true) return;
-            baseBackup = baseDialog.FileName;
+            OperationText = "请至少选择一项备份内容。";
+            return;
         }
-        var dialog = new Microsoft.Win32.SaveFileDialog
-        {
-            Title = IsIncremental ? "创建增量备份" : "创建完整备份",
-            Filter = "CloudLight Codex Backup (*.clcbak)|*.clcbak",
-            DefaultExt = ".clcbak",
-            AddExtension = true,
-            InitialDirectory = Directory.CreateDirectory(_service.BackupDirectory).FullName,
-            FileName = $"CloudLight-Codex-{(IsIncremental ? "Incremental" : "Full")}-{DateTime.Now:yyyy-MM-dd-HHmmss}.clcbak"
-        };
-        if (dialog.ShowDialog() != true) return;
-        if (System.Windows.MessageBox.Show("备份可能包含账号凭据，请妥善保存备份文件。", "备份提示", MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK) return;
+
         Busy = true;
         _backupCancellation = new CancellationTokenSource();
         try
         {
+            string backupDirectory;
+            try
+            {
+                backupDirectory = Directory.CreateDirectory(_service.BackupDirectory).FullName;
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                throw new InvalidOperationException("无法创建备份目录，请检查目录权限或在设置中修改应用数据目录。", exception);
+            }
+
+            var baseBackup = "";
+            if (IsIncremental)
+            {
+                var baseDialog = new Microsoft.Win32.OpenFileDialog
+                {
+                    Title = "选择上一次完整或增量备份",
+                    Filter = "CloudLight Codex Backup (*.clcbak)|*.clcbak",
+                    InitialDirectory = backupDirectory
+                };
+                if (baseDialog.ShowDialog() != true)
+                {
+                    OperationText = "已取消创建备份。";
+                    return;
+                }
+                baseBackup = baseDialog.FileName;
+            }
+
+            var dialog = new Microsoft.Win32.SaveFileDialog
+            {
+                Title = IsIncremental ? "创建增量备份" : "创建完整备份",
+                Filter = "CloudLight Codex Backup (*.clcbak)|*.clcbak",
+                DefaultExt = ".clcbak",
+                AddExtension = true,
+                InitialDirectory = backupDirectory,
+                FileName = $"CloudLight-Codex-{(IsIncremental ? "Incremental" : "Full")}-{DateTime.Now:yyyy-MM-dd-HHmmss}.clcbak"
+            };
+            if (dialog.ShowDialog() != true)
+            {
+                OperationText = "已取消创建备份。";
+                return;
+            }
+            if (System.Windows.MessageBox.Show("备份可能包含账号凭据，请妥善保存备份文件。", "备份提示", MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK)
+            {
+                OperationText = "已取消创建备份。";
+                return;
+            }
+
+            OperationText = "正在扫描持久化数据…";
             var result = IsIncremental
                 ? await _service.CreateIncrementalBackupAsync(dialog.FileName, baseBackup, IncludeCodex, IncludeBridge, CreateProgress(), _backupCancellation.Token)
                 : await _service.CreateBackupAsync(dialog.FileName, IncludeCodex, IncludeBridge, CreateProgress(), _backupCancellation.Token);
@@ -284,6 +329,9 @@ public sealed class BackupViewModel : ObservableObject
     {
         ProgressStage = $"{value.Stage} · {value.ProcessedFiles:N0}/{value.TotalFiles:N0} 个文件 · {FormatSize(value.ProcessedBytes)}/{FormatSize(value.TotalBytes)}";
         ProgressPercent = value.Percent;
+        if (value.Stage is "正在扫描持久化数据") OperationText = "正在扫描持久化数据…";
+        else if (value.Stage is "正在校验并压缩" or "正在压缩" or "正在保存变化内容") OperationText = "正在校验并压缩…";
+        else if (value.Stage.Contains("比较", StringComparison.Ordinal) || value.Stage.Contains("计算变化", StringComparison.Ordinal)) OperationText = $"{value.Stage}…";
     });
     private void AddRecent(string text) { RecentOperations.Insert(0, $"{DateTime.Now:HH:mm:ss}  {text}"); while (RecentOperations.Count > 10) RecentOperations.RemoveAt(RecentOperations.Count - 1); }
     private static string BuildBackupDetails(BackupManifest manifest)
@@ -317,6 +365,7 @@ public sealed class BackupViewModel : ObservableObject
                $"文件数量  {manifest.FileCount:N0}\n" +
                $"总大小  {FormatSize(manifest.TotalSize)}\n" +
                $"已排除运行时数据  {manifest.ExcludedRuntimeFiles.Count:N0} 项\n\n" +
+               $"已排除备份存储区  {manifest.ExcludedBackupStorage.Count:N0} 项\n\n" +
                $"可恢复数据项\n{modules}\n\n" +
                $"缺失或无效项\n{missingText}";
     }

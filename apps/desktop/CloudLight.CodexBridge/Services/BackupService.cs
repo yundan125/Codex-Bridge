@@ -52,7 +52,7 @@ public sealed class BackupService
     public string CodexHome => _codexHomeOverride is null ? DetectCodexHome() : Path.GetFullPath(_codexHomeOverride);
     public string BridgeLocalData => _bridgeLocalOverride is null ? _settings.DataDirectory : Path.GetFullPath(_bridgeLocalOverride);
     public string BridgeRoamingData => _bridgeRoamingOverride is null ? Path.GetDirectoryName(_settings.SettingsFile)! : Path.GetFullPath(_bridgeRoamingOverride);
-    public string BackupDirectory => _settings.BackupDirectory;
+    public string BackupDirectory => Path.GetFullPath(_settings.BackupDirectory);
 
     public static string DetectCodexHome()
     {
@@ -63,7 +63,8 @@ public sealed class BackupService
 
     public async Task<(int Files, long Size)> ScanAsync(bool includeCodex, bool includeBridge, CancellationToken cancellationToken = default)
     {
-        var scan = await Task.Run(() => EnumerateFiles(GetSources(includeCodex, includeBridge), cancellationToken), cancellationToken);
+        var excludedSourceRoots = GetExcludedSourceRoots();
+        var scan = await Task.Run(() => EnumerateFiles(GetSources(includeCodex, includeBridge), excludedSourceRoots, cancellationToken), cancellationToken);
         return (scan.Files.Count, scan.Files.Sum(item => item.Size));
     }
 
@@ -77,13 +78,14 @@ public sealed class BackupService
         if (!includeCodex && !includeBridge) throw new InvalidOperationException("请至少选择一项备份内容。");
         destination = Path.GetFullPath(destination);
         var sources = GetSources(includeCodex, includeBridge);
-        foreach (var source in sources.Where(source => Directory.Exists(source.Root)))
-            if (IsWithin(destination, source.Root)) throw new InvalidOperationException("备份文件不能保存在被备份的数据目录内。");
+        EnsureSafeBackupDestination(destination, sources);
+        var excludedSourceRoots = GetExcludedSourceRoots();
 
         progress?.Report(new BackupProgress("正在扫描持久化数据", 0, 0, 0, 0));
-        var scan = await Task.Run(() => EnumerateFiles(sources, cancellationToken), cancellationToken);
+        var scan = await Task.Run(() => EnumerateFiles(sources, excludedSourceRoots, cancellationToken), cancellationToken);
         var manifest = NewManifest(includeCodex, includeBridge);
         manifest.ExcludedRuntimeFiles.AddRange(scan.ExcludedRuntimeFiles);
+        manifest.ExcludedBackupStorage.AddRange(scan.ExcludedBackupStorage);
         manifest.Failures.AddRange(scan.Failures);
         manifest.CriticalFiles.AddRange(scan.Files.Where(file => file.Classification.IsCritical).Select(file => file.ArchivePath));
         manifest.OptionalFiles.AddRange(scan.Files.Where(file => !file.Classification.IsCritical).Select(file => file.ArchivePath));
@@ -181,16 +183,17 @@ public sealed class BackupService
             throw new InvalidOperationException("增量备份不能覆盖它所依赖的基础备份。");
         var baseSnapshot = await ResolveBackupChainAsync(baseBackupPath, progress, cancellationToken);
         var sources = GetSources(includeCodex, includeBridge);
-        foreach (var source in sources.Where(source => Directory.Exists(source.Root)))
-            if (IsWithin(destination, source.Root)) throw new InvalidOperationException("备份文件不能保存在被备份的数据目录内。");
+        EnsureSafeBackupDestination(destination, sources);
+        var excludedSourceRoots = GetExcludedSourceRoots();
 
         progress?.Report(new BackupProgress("正在比较基础备份", 0, 0, 0, 0));
-        var scan = await Task.Run(() => EnumerateFiles(sources, cancellationToken), cancellationToken);
+        var scan = await Task.Run(() => EnumerateFiles(sources, excludedSourceRoots, cancellationToken), cancellationToken);
         var manifest = NewManifest(includeCodex, includeBridge);
         manifest.BackupType = BackupTypes.Incremental;
         manifest.BaseBackupId = baseSnapshot.Manifest.BackupId;
         manifest.BaseBackupFile = Path.GetFileName(baseBackupPath);
         manifest.ExcludedRuntimeFiles.AddRange(scan.ExcludedRuntimeFiles);
+        manifest.ExcludedBackupStorage.AddRange(scan.ExcludedBackupStorage);
         manifest.Failures.AddRange(scan.Failures);
 
         var current = new Dictionary<string, BackupFileRecord>(StringComparer.OrdinalIgnoreCase);
@@ -838,7 +841,7 @@ public sealed class BackupService
     {
         FormatVersion = CurrentFormatVersion,
         CreatedAt = DateTimeOffset.Now,
-        AppVersion = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.3.4",
+        AppVersion = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.3.5",
         CodexVersion = TryGetCodexVersion(),
         MachineName = Environment.MachineName,
         CodexHome = CodexHome,
@@ -862,13 +865,45 @@ public sealed class BackupService
         return result;
     }
 
-    private static ScanResult EnumerateFiles(IEnumerable<BackupSource> sources, CancellationToken cancellationToken)
+    private string[] GetExcludedSourceRoots() => [BackupDirectory];
+
+    private void EnsureSafeBackupDestination(string destination, IReadOnlyList<BackupSource> sources)
+    {
+        if (!IsSafeBackupDestination(destination, sources, BackupDirectory))
+            throw new InvalidOperationException("备份文件不能保存在被备份的数据目录内。");
+    }
+
+    private static bool IsSafeBackupDestination(string destination, IReadOnlyList<BackupSource> sources, string backupDirectory)
+    {
+        foreach (var source in sources.Where(source => Directory.Exists(source.Root)))
+        {
+            if (!IsWithin(destination, source.Root)) continue;
+            // BackupDirectory is an output-only root. It is safe only for the
+            // Bridge local source that explicitly excludes the same absolute
+            // directory; an overlapping Codex or roaming source still rejects it.
+            var isExcludedBackupStorage = source.Prefix.Equals("bridge/local", StringComparison.OrdinalIgnoreCase) &&
+                                          IsWithin(destination, backupDirectory) &&
+                                          IsWithinOrEqual(backupDirectory, source.Root);
+            if (!isExcludedBackupStorage) return false;
+        }
+        return true;
+    }
+
+    private static ScanResult EnumerateFiles(
+        IEnumerable<BackupSource> sources,
+        IReadOnlyList<string> excludedBackupStorageRoots,
+        CancellationToken cancellationToken)
     {
         var result = new ScanResult();
         foreach (var source in sources)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (!Directory.Exists(source.Root)) continue;
+            if (IsExcludedBackupStorageDirectory(source.Root, source, excludedBackupStorageRoots))
+            {
+                result.ExcludedBackupStorage.Add($"{source.Prefix}/**");
+                continue;
+            }
             var pending = new Stack<string>();
             pending.Push(source.Root);
             while (pending.Count > 0)
@@ -881,7 +916,8 @@ public sealed class BackupService
                     {
                         var relativeDirectory = Path.GetRelativePath(source.Root, child).Replace('\\', '/');
                         var archiveDirectory = $"{source.Prefix}/{relativeDirectory}";
-                        if (IsExcludedRuntimeDirectory(archiveDirectory)) result.ExcludedRuntimeFiles.Add(archiveDirectory + "/**");
+                        if (IsExcludedBackupStorageDirectory(child, source, excludedBackupStorageRoots)) result.ExcludedBackupStorage.Add(archiveDirectory + "/**");
+                        else if (IsExcludedRuntimeDirectory(archiveDirectory)) result.ExcludedRuntimeFiles.Add(archiveDirectory + "/**");
                         else pending.Push(child);
                     }
                     foreach (var path in Directory.GetFiles(directory))
@@ -915,6 +951,12 @@ public sealed class BackupService
         }
         return result;
     }
+
+    private static bool IsExcludedBackupStorageDirectory(string path, BackupSource source, IReadOnlyList<string> excludedBackupStorageRoots) =>
+        // Match the configured absolute path only; a user-created directory
+        // named "backups" elsewhere remains normal Bridge data.
+        source.Prefix.Equals("bridge/local", StringComparison.OrdinalIgnoreCase) &&
+        excludedBackupStorageRoots.Any(root => IsWithinOrEqual(path, root) && IsWithinOrEqual(root, source.Root));
 
     private static async Task ExtractRecoverableAsync(
         string backupPath,
@@ -1136,6 +1178,7 @@ public sealed class BackupService
         manifest.CriticalFiles ??= [];
         manifest.OptionalFiles ??= [];
         manifest.ExcludedRuntimeFiles ??= [];
+        manifest.ExcludedBackupStorage ??= [];
         manifest.MissingCriticalFiles ??= [];
         manifest.ValidationIssues ??= [];
         manifest.Modules ??= [];
@@ -1424,6 +1467,12 @@ public sealed class BackupService
         var fullRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
         return fullPath.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase);
     }
+    private static bool IsWithinOrEqual(string path, string root)
+    {
+        var fullPath = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var fullRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return fullPath.Equals(fullRoot, StringComparison.OrdinalIgnoreCase) || IsWithin(fullPath, fullRoot);
+    }
     private static DateTimeOffset ClampZipTime(DateTimeOffset value) => value.Year < 1980 ? new DateTimeOffset(1980, 1, 1, 0, 0, 0, TimeSpan.Zero) : value;
     private static void TryDeleteFile(string path) { try { if (File.Exists(path)) File.Delete(path); } catch { } }
     private static void TryDeleteDirectory(string path) { try { if (Directory.Exists(path)) Directory.Delete(path, recursive: true); } catch { } }
@@ -1443,6 +1492,7 @@ public sealed class BackupService
         public List<SourceFile> Files { get; } = [];
         public List<BackupFailure> Failures { get; } = [];
         public List<string> ExcludedRuntimeFiles { get; } = [];
+        public List<string> ExcludedBackupStorage { get; } = [];
     }
     private sealed class FileCapture(FileStream stream, string? temporaryPath) : IAsyncDisposable
     {

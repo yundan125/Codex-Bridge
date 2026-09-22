@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Xml.Linq;
 using CloudLight.CodexBridge.Controls;
+using CloudLight.CodexBridge.Infrastructure;
 using CloudLight.CodexBridge.Services;
 using CloudLight.CodexBridge.Models;
 using CloudLight.CodexBridge.ViewModels;
@@ -597,6 +598,142 @@ if (args.Contains("--live-codex-discovery", StringComparer.OrdinalIgnoreCase))
     finally
     {
         Environment.SetEnvironmentVariable("PATH", originalPath);
+    }
+}
+
+if (args.Contains("--backup-production-layout-tests", StringComparer.OrdinalIgnoreCase))
+{
+    var productionRoot = Path.Combine(Path.GetTempPath(), $"CloudLight-BackupProduction-{Guid.NewGuid():N}");
+    var dataDirectory = Path.Combine(productionRoot, "data");
+    var codexHome = Path.Combine(productionRoot, "codex");
+    var configDirectory = Path.Combine(dataDirectory, "config");
+    var backupDirectory = Path.Combine(dataDirectory, "backups");
+    try
+    {
+        Directory.CreateDirectory(Path.Combine(dataDirectory, "data"));
+        Directory.CreateDirectory(Path.Combine(dataDirectory, "logs"));
+        Directory.CreateDirectory(Path.Combine(dataDirectory, "secrets"));
+        Directory.CreateDirectory(configDirectory);
+        Directory.CreateDirectory(backupDirectory);
+        Directory.CreateDirectory(Path.Combine(codexHome, "sessions"));
+        Directory.CreateDirectory(Path.Combine(dataDirectory, "data", "backups"));
+        await File.WriteAllTextAsync(Path.Combine(dataDirectory, "data", "state.json"), "{\"ok\":true}");
+        await File.WriteAllTextAsync(Path.Combine(dataDirectory, "data", "backups", "user-created-backup.json"), "user data");
+        await File.WriteAllTextAsync(Path.Combine(configDirectory, "settings.json"), "{\"closeToTray\":true}");
+        await File.WriteAllTextAsync(Path.Combine(codexHome, "sessions", "one.jsonl"), "{\"id\":1}\n");
+        await File.WriteAllTextAsync(Path.Combine(backupDirectory, "old1.clcbak"), "old backup one");
+        await File.WriteAllTextAsync(Path.Combine(backupDirectory, "old2.clcbak"), "old backup two");
+
+        var productionSettings = new SettingsService(dataDirectory, Path.Combine(configDirectory, "settings.json"));
+        var productionService = new BackupService(productionSettings, codexHome, dataDirectory, configDirectory);
+        var scanBeforeStorageFile = await productionService.ScanAsync(true, true);
+        await File.WriteAllBytesAsync(Path.Combine(backupDirectory, "large-placeholder.clcbak"), new byte[2 * 1024 * 1024]);
+        var scanAfterStorageFile = await productionService.ScanAsync(true, true);
+        Assert(scanAfterStorageFile.Files == scanBeforeStorageFile.Files && scanAfterStorageFile.Size == scanBeforeStorageFile.Size,
+            "ScanAsync 不得统计 backups 中的备份文件或大文件");
+
+        var productionDestination = Path.Combine(backupDirectory, "full.clcbak");
+        var productionResult = await productionService.CreateBackupAsync(productionDestination, true, true);
+        Assert(productionResult.IsComplete && File.Exists(productionDestination) && new FileInfo(productionDestination).Length > 0,
+            "生产目录布局下的完整备份必须成功生成");
+        Assert(productionResult.Manifest.ExcludedBackupStorage.Any(path => path.Equals("bridge/local/backups/**", StringComparison.OrdinalIgnoreCase)),
+            "manifest 必须记录被排除的 Bridge 备份存储区");
+        Assert(productionResult.Manifest.Files.All(file => !file.RelativePath.StartsWith("bridge/local/backups/", StringComparison.OrdinalIgnoreCase)),
+            "完整备份不得包含 backups 中已有的 backup archive");
+        Assert(productionResult.Manifest.Files.All(file => !file.RelativePath.Contains("old1.clcbak", StringComparison.OrdinalIgnoreCase) &&
+                                                            !file.RelativePath.Contains("old2.clcbak", StringComparison.OrdinalIgnoreCase)),
+            "完整备份 manifest 不得包含旧 backup archive");
+        Assert(productionResult.Manifest.Files.Any(file => file.RelativePath == "bridge/local/data/backups/user-created-backup.json"),
+            "不得按目录名粗暴排除用户在其他位置创建的 backups 目录");
+
+        var bridgeDestinationRejected = false;
+        try { await productionService.CreateBackupAsync(Path.Combine(configDirectory, "bad.clcbak"), false, true); }
+        catch (InvalidOperationException exception) when (exception.Message == "备份文件不能保存在被备份的数据目录内。") { bridgeDestinationRejected = true; }
+        Assert(bridgeDestinationRejected, "BridgeLocalData 的非排除目录仍必须拒绝作为备份目标");
+
+        var codexDestinationRejected = false;
+        try { await productionService.CreateBackupAsync(Path.Combine(codexHome, "bad.clcbak"), true, false); }
+        catch (InvalidOperationException exception) when (exception.Message == "备份文件不能保存在被备份的数据目录内。") { codexDestinationRejected = true; }
+        Assert(codexDestinationRejected, "IncludeCodex=true 时 CodexHome 内的目标仍必须拒绝");
+
+        var externalDestination = Path.Combine(productionRoot, "external", "full.clcbak");
+        var externalResult = await productionService.CreateBackupAsync(externalDestination, false, true);
+        Assert(externalResult.IsComplete && File.Exists(externalDestination), "普通外部目录必须允许创建备份");
+
+        await File.WriteAllTextAsync(Path.Combine(dataDirectory, "data", "state.json"), "{\"ok\":\"changed\"}");
+        var incrementalDestination = Path.Combine(backupDirectory, "incremental.clcbak");
+        var incrementalResult = await productionService.CreateIncrementalBackupAsync(incrementalDestination, productionDestination, true, true);
+        Assert(incrementalResult.Manifest.BackupType == BackupTypes.Incremental &&
+               incrementalResult.Manifest.BaseBackupId == productionResult.Manifest.BackupId &&
+               incrementalResult.Manifest.Files.All(file => !file.RelativePath.StartsWith("bridge/local/backups/", StringComparison.OrdinalIgnoreCase)),
+            "生产目录布局下的增量备份必须成功且不得递归包含基础 backup archive");
+        var incrementalInspection = await productionService.InspectBackupAsync(incrementalDestination);
+        Assert(incrementalInspection.ChainLength >= 2 &&
+               incrementalInspection.EffectiveFiles.All(file => !file.RelativePath.Contains("backups/", StringComparison.OrdinalIgnoreCase)),
+            "增量备份链必须可读取且不得把 backup storage 当作 Bridge 数据");
+
+        var productionRestore = await productionService.RestoreAsync(productionDestination, new RestoreOptions
+        {
+            RestoreCodex = true,
+            RestoreBridge = true,
+            Replace = true,
+            VerifyNoExternalCodex = false,
+            PreRestoreDirectory = backupDirectory
+        }, null, null);
+        Assert(File.Exists(productionRestore.PreRestoreBackupPath) &&
+               Path.GetFullPath(productionRestore.PreRestoreBackupPath).StartsWith(Path.GetFullPath(backupDirectory), StringComparison.OrdinalIgnoreCase),
+            "恢复前自动备份必须能写入 DataDirectory\\backups");
+        var preRestoreInspection = await productionService.InspectBackupAsync(productionRestore.PreRestoreBackupPath);
+        Assert(preRestoreInspection.Manifest.Files.All(file => !file.RelativePath.StartsWith("bridge/local/backups/", StringComparison.OrdinalIgnoreCase)),
+            "恢复前自动备份不得递归包含 backup storage");
+
+        var productionPaths = new AppDataPathService(Path.Combine(productionRoot, "pointer", "paths.json"));
+        await productionPaths.SavePathsAsync(dataDirectory, Path.Combine(dataDirectory, "logs"));
+        using (var productionLogs = new LogService(productionPaths))
+        {
+            var viewModel = new BackupViewModel(productionService, productionLogs);
+            viewModel.IsFullBackup = true;
+            Assert(!viewModel.IsIncremental && viewModel.IsFullBackup, "选择完整备份必须设置 IsIncremental=false");
+            viewModel.IsIncremental = true;
+            Assert(viewModel.IsIncremental && !viewModel.IsFullBackup, "选择增量备份必须设置 IsIncremental=true");
+            viewModel.IsFullBackup = true;
+            Assert(!viewModel.IsIncremental && viewModel.IsFullBackup, "从增量切回完整备份必须恢复 IsIncremental=false");
+
+            var blockedDataDirectory = Path.Combine(productionRoot, "blocked-data");
+            await File.WriteAllTextAsync(blockedDataDirectory, "not a directory");
+            var blockedSettings = new SettingsService(blockedDataDirectory, Path.Combine(blockedDataDirectory, "config", "settings.json"));
+            var blockedService = new BackupService(blockedSettings, codexHome, dataDirectory, configDirectory);
+            var blockedViewModel = new BackupViewModel(blockedService, productionLogs);
+            blockedViewModel.CreateBackupCommand.Execute(null);
+            for (var attempt = 0; attempt < 50 && blockedViewModel.Busy; attempt++) await Task.Delay(10);
+            Assert(!blockedViewModel.Busy &&
+                   blockedViewModel.OperationText == "无法创建备份目录，请检查目录权限或在设置中修改应用数据目录。",
+                "备份目录不可用时 UI 必须显示明确错误，不得 silent failure");
+        }
+
+        var commandStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseCommand = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var commandInvocations = 0;
+        var command = new AsyncRelayCommand(async () =>
+        {
+            commandInvocations++;
+            commandStarted.TrySetResult();
+            await releaseCommand.Task;
+        });
+        command.Execute(null);
+        await commandStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        command.Execute(null);
+        Assert(commandInvocations == 1 && !command.CanExecute(null), "备份运行中不能重复执行 AsyncRelayCommand");
+        releaseCommand.SetResult();
+        for (var attempt = 0; attempt < 50 && !command.CanExecute(null); attempt++) await Task.Delay(10);
+        Assert(command.CanExecute(null), "AsyncRelayCommand 完成后必须允许再次执行");
+
+        Console.WriteLine("PASS production-layout full/incremental/scan-exclusion/pre-restore/safety/UI regression tests");
+        return;
+    }
+    finally
+    {
+        try { if (Directory.Exists(productionRoot)) Directory.Delete(productionRoot, true); } catch { }
     }
 }
 

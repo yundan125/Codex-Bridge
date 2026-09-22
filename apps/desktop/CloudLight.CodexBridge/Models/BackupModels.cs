@@ -19,6 +19,7 @@ public sealed class BackupManifest
     public List<string> CriticalFiles { get; set; } = [];
     public List<string> OptionalFiles { get; set; } = [];
     public List<string> ExcludedRuntimeFiles { get; set; } = [];
+    public List<string> ExcludedBackupStorage { get; set; } = [];
     public List<string> MissingCriticalFiles { get; set; } = [];
     public List<BackupValidationIssue> ValidationIssues { get; set; } = [];
     public List<BackupModuleInfo> Modules { get; set; } = [];
